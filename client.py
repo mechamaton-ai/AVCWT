@@ -3,7 +3,8 @@ import os
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
-                             QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem)
+                             QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
+                             QComboBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
@@ -20,6 +21,7 @@ class MpvSignals(QObject):
     time_pos_changed = pyqtSignal(float)
     duration_changed = pyqtSignal(float)
     pause_changed = pyqtSignal(bool)
+    track_list_changed = pyqtSignal(list)
 
 class WebSocketThread(QThread):
     message_received = pyqtSignal(dict)
@@ -105,9 +107,22 @@ class SyncPlayClient(QMainWindow):
         self.slider.setRange(0, 1000)
         self.slider.setEnabled(False)
         
+        self.cb_audio = QComboBox()
+        self.cb_audio.setFixedWidth(100)
+        self.cb_subtitles = QComboBox()
+        self.cb_subtitles.setFixedWidth(100)
+        
+        self.btn_toggle_sidebar = QPushButton("☰")
+        self.btn_toggle_sidebar.setFixedWidth(30)
+        
         control_layout.addWidget(self.btn_play_pause)
         control_layout.addWidget(self.slider)
         control_layout.addWidget(self.lbl_time)
+        control_layout.addWidget(QLabel("Audio:"))
+        control_layout.addWidget(self.cb_audio)
+        control_layout.addWidget(QLabel("Subs:"))
+        control_layout.addWidget(self.cb_subtitles)
+        control_layout.addWidget(self.btn_toggle_sidebar)
         left_layout.addLayout(control_layout)
         
         # Initialize MPV
@@ -118,9 +133,9 @@ class SyncPlayClient(QMainWindow):
                               osc=True)
 
         # Right Panel (Controls & Playlist)
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        main_layout.addWidget(right_panel, stretch=1)
+        self.right_panel = QWidget()
+        right_layout = QVBoxLayout(self.right_panel)
+        main_layout.addWidget(self.right_panel, stretch=1)
 
         # --- Playlist / File Management ---
         self.file_list = QListWidget()
@@ -171,18 +186,26 @@ class SyncPlayClient(QMainWindow):
         # Control bar signals
         self.btn_play_pause.clicked.connect(self.toggle_playback)
         self.slider.sliderMoved.connect(self.seek_video)
+        self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
+        self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
+        self.cb_subtitles.currentIndexChanged.connect(self.change_subtitle_track)
         
         # Mpv Thread Signals to GUI
         self.mpv_signals = MpvSignals()
         self.mpv_signals.time_pos_changed.connect(self.update_ui_time)
         self.mpv_signals.duration_changed.connect(self.update_ui_duration)
         self.mpv_signals.pause_changed.connect(self.update_ui_pause)
+        self.mpv_signals.track_list_changed.connect(self.update_ui_tracks)
         self._current_duration = 0.0
 
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
         self.player.observe_property('duration', self.on_mpv_duration)
+        self.player.observe_property('track-list', self.on_mpv_track_list)
+
+    def toggle_sidebar(self):
+        self.right_panel.setVisible(not self.right_panel.isVisible())
 
     def toggle_playback(self):
         if self.player.pause is not None:
@@ -218,6 +241,54 @@ class SyncPlayClient(QMainWindow):
 
     def update_ui_pause(self, is_paused):
         self.btn_play_pause.setText("Play" if is_paused else "Pause")
+
+    def change_audio_track(self, index):
+        track_id = self.cb_audio.itemData(index)
+        if track_id is None:
+            self.player.aid = "no"
+        else:
+            self.player.aid = track_id
+
+    def change_subtitle_track(self, index):
+        track_id = self.cb_subtitles.itemData(index)
+        if track_id is None:
+            self.player.sid = "no"
+        else:
+            self.player.sid = track_id
+
+    def update_ui_tracks(self, tracks):
+        # We need to temporarily block signals so updating the combo boxes 
+        # doesn't trigger a switch command.
+        self.cb_audio.blockSignals(True)
+        self.cb_subtitles.blockSignals(True)
+        
+        self.cb_audio.clear()
+        self.cb_subtitles.clear()
+        
+        self.cb_audio.addItem("None", None)
+        self.cb_subtitles.addItem("None", None)
+        
+        audio_idx = 0
+        sub_idx = 0
+        
+        for track in tracks:
+            # Type is 'audio', 'sub', or 'video'
+            if track.get('type') == 'audio':
+                title = track.get('title') or track.get('lang') or f"Audio {track.get('id')}"
+                self.cb_audio.addItem(title, track.get('id'))
+                if track.get('selected'):
+                    audio_idx = self.cb_audio.count() - 1
+            elif track.get('type') == 'sub':
+                title = track.get('title') or track.get('lang') or f"Sub {track.get('id')}"
+                self.cb_subtitles.addItem(title, track.get('id'))
+                if track.get('selected'):
+                    sub_idx = self.cb_subtitles.count() - 1
+                    
+        self.cb_audio.setCurrentIndex(audio_idx)
+        self.cb_subtitles.setCurrentIndex(sub_idx)
+        
+        self.cb_audio.blockSignals(False)
+        self.cb_subtitles.blockSignals(False)
 
     def connect_to_server(self):
         uri = self.ip_input.text()
@@ -265,6 +336,10 @@ class SyncPlayClient(QMainWindow):
     def on_mpv_duration(self, _name, value):
         if value is not None:
             self.mpv_signals.duration_changed.emit(value)
+
+    def on_mpv_track_list(self, _name, value):
+        if value is not None:
+            self.mpv_signals.track_list_changed.emit(value)
 
     def on_mpv_time_pos(self, _name, value):
         if value is not None:
