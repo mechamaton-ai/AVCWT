@@ -139,7 +139,8 @@ class SyncPlayClient(QMainWindow):
         self.player = mpv.MPV(wid=str(int(self.video_container.winId())),
                               input_default_bindings=True,
                               input_vo_keyboard=True,
-                              osc=True)
+                              osc=True,
+                              cache="yes")
 
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
@@ -238,6 +239,7 @@ class SyncPlayClient(QMainWindow):
         bytes_val = value_mb * 1024 * 1024
         # Apply to player properties (python-mpv accesses these directly)
         try:
+            self.player.cache = "yes"
             self.player.demuxer_max_bytes = bytes_val
             self.player.demuxer_max_back_bytes = bytes_val
         except AttributeError:
