@@ -146,21 +146,18 @@ class SyncPlayClient(QMainWindow):
         right_layout = QVBoxLayout(self.right_panel)
         main_layout.addWidget(self.right_panel, stretch=1)
 
-        # --- Playlist / File Management ---
+        # --- Playlist / URL Management ---
         self.file_list = QListWidget()
         right_layout.addWidget(QLabel("Playlist"))
         right_layout.addWidget(self.file_list)
 
         btn_layout = QHBoxLayout()
-        self.btn_add_file = QPushButton("Add File")
         self.btn_add_url = QPushButton("Add URL")
         self.btn_remove_file = QPushButton("Remove")
-        btn_layout.addWidget(self.btn_add_file)
         btn_layout.addWidget(self.btn_add_url)
         btn_layout.addWidget(self.btn_remove_file)
         right_layout.addLayout(btn_layout)
         
-        self.btn_add_file.clicked.connect(self.add_file)
         self.btn_add_url.clicked.connect(self.add_url)
         self.btn_remove_file.clicked.connect(self.remove_file)
         self.file_list.itemDoubleClicked.connect(self.play_file)
@@ -434,18 +431,12 @@ class SyncPlayClient(QMainWindow):
             # Wait 1s for the server to spin up and bind the port before connecting
             QTimer.singleShot(1000, self.connect_to_server)
 
-    def add_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Video File", "", "Video Files (*.mp4 *.mkv *.avi *.webm);;All Files (*)")
-        if file_path:
-            self.file_list.addItem(file_path)
-
     def add_url(self):
         url, ok = QInputDialog.getText(self, "Add URL", "Enter Media URL:")
         if ok and url:
             item = QListWidgetItem(url)
             self.file_list.addItem(item)
             self.file_list.setCurrentItem(item)
-            self.play_file(item)
 
     def remove_file(self):
         selected = self.file_list.selectedItems()
@@ -455,6 +446,7 @@ class SyncPlayClient(QMainWindow):
             self.file_list.takeItem(self.file_list.row(item))
 
     def play_file(self, item):
+        self.player.pause = True
         self.player.play(item.text())
 
     def keyPressEvent(self, event):
