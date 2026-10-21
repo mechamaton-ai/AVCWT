@@ -3,8 +3,8 @@ import os
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
-                             QLabel, QLineEdit, QInputDialog)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+                             QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
 os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
@@ -15,6 +15,11 @@ import asyncio
 import websockets
 import json
 from server import run_server
+
+class MpvSignals(QObject):
+    time_pos_changed = pyqtSignal(float)
+    duration_changed = pyqtSignal(float)
+    pause_changed = pyqtSignal(bool)
 
 class WebSocketThread(QThread):
     message_received = pyqtSignal(dict)
@@ -81,10 +86,29 @@ class SyncPlayClient(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
 
-        # Left Panel (Video Player Area)
+        # Left Panel (Video Player Area & Controls)
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        main_layout.addWidget(left_panel, stretch=3)
+
         self.video_container = QWidget()
         self.video_container.setStyleSheet("background-color: black;")
-        main_layout.addWidget(self.video_container, stretch=3)
+        left_layout.addWidget(self.video_container, stretch=1)
+        
+        # Player Controls Bar
+        control_layout = QHBoxLayout()
+        self.btn_play_pause = QPushButton("Play")
+        self.btn_play_pause.setFixedWidth(60)
+        self.lbl_time = QLabel("00:00 / 00:00")
+        
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(0, 1000)
+        self.slider.setEnabled(False)
+        
+        control_layout.addWidget(self.btn_play_pause)
+        control_layout.addWidget(self.slider)
+        control_layout.addWidget(self.lbl_time)
+        left_layout.addLayout(control_layout)
         
         # Initialize MPV
         locale.setlocale(locale.LC_NUMERIC, 'C') # required by mpv
@@ -144,9 +168,56 @@ class SyncPlayClient(QMainWindow):
         self.ignore_next_seek = False
         self.ignore_next_pause = False
         
+        # Control bar signals
+        self.btn_play_pause.clicked.connect(self.toggle_playback)
+        self.slider.sliderMoved.connect(self.seek_video)
+        
+        # Mpv Thread Signals to GUI
+        self.mpv_signals = MpvSignals()
+        self.mpv_signals.time_pos_changed.connect(self.update_ui_time)
+        self.mpv_signals.duration_changed.connect(self.update_ui_duration)
+        self.mpv_signals.pause_changed.connect(self.update_ui_pause)
+        self._current_duration = 0.0
+
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
+        self.player.observe_property('duration', self.on_mpv_duration)
+
+    def toggle_playback(self):
+        if self.player.pause is not None:
+            self.player.pause = not self.player.pause
+
+    def seek_video(self, value):
+        if self._current_duration > 0:
+            new_pos = (value / 1000.0) * self._current_duration
+            self.player.time_pos = new_pos
+
+    def format_time(self, seconds):
+        if seconds is None:
+            return "00:00"
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def update_ui_time(self, time_pos):
+        if self._current_duration > 0:
+            self.slider.blockSignals(True)
+            self.slider.setValue(int((time_pos / self._current_duration) * 1000))
+            self.slider.blockSignals(False)
+        self.lbl_time.setText(f"{self.format_time(time_pos)} / {self.format_time(self._current_duration)}")
+
+    def update_ui_duration(self, duration):
+        self._current_duration = duration
+        if duration > 0:
+            self.slider.setEnabled(True)
+        else:
+            self.slider.setEnabled(False)
+
+    def update_ui_pause(self, is_paused):
+        self.btn_play_pause.setText("Play" if is_paused else "Pause")
 
     def connect_to_server(self):
         uri = self.ip_input.text()
@@ -178,6 +249,9 @@ class SyncPlayClient(QMainWindow):
                 self.player.time_pos = position
 
     def on_mpv_pause(self, _name, value):
+        if value is not None:
+            self.mpv_signals.pause_changed.emit(value)
+            
         if self.ignore_next_pause:
             self.ignore_next_pause = False
             return
@@ -188,7 +262,14 @@ class SyncPlayClient(QMainWindow):
                 'state': value
             })
 
+    def on_mpv_duration(self, _name, value):
+        if value is not None:
+            self.mpv_signals.duration_changed.emit(value)
+
     def on_mpv_time_pos(self, _name, value):
+        if value is not None:
+            self.mpv_signals.time_pos_changed.emit(value)
+            
         if self.ignore_next_seek:
             # We don't reset ignore_next_seek here immediately because time-pos
             # updates constantly. We'll let a small tolerance handle it, or 
@@ -230,7 +311,10 @@ class SyncPlayClient(QMainWindow):
     def add_url(self):
         url, ok = QInputDialog.getText(self, "Add URL", "Enter Media URL:")
         if ok and url:
-            self.file_list.addItem(url)
+            item = QListWidgetItem(url)
+            self.file_list.addItem(item)
+            self.file_list.setCurrentItem(item)
+            self.play_file(item)
 
     def remove_file(self):
         selected = self.file_list.selectedItems()
