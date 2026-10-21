@@ -28,7 +28,7 @@ class SyncServer:
         logging.info(f"Client disconnected. Total clients: {len(self.clients)}")
         await self.broadcast_user_count()
 
-    async def handler(self, websocket, path):
+    async def handler(self, websocket):
         await self.register(websocket)
         try:
             async for message in websocket:
