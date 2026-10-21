@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
                              QComboBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtGui import QPalette, QColor
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
 os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
@@ -115,6 +116,14 @@ class SyncPlayClient(QMainWindow):
         self.btn_toggle_sidebar = QPushButton("☰")
         self.btn_toggle_sidebar.setFixedWidth(30)
         
+        self.btn_fullscreen = QPushButton("⛶")
+        self.btn_fullscreen.setFixedWidth(30)
+        
+        # We need the control bar widget to be hideable
+        self.control_widget = QWidget()
+        self.control_widget.setLayout(control_layout)
+        left_layout.addWidget(self.control_widget)
+        
         control_layout.addWidget(self.btn_play_pause)
         control_layout.addWidget(self.slider)
         control_layout.addWidget(self.lbl_time)
@@ -123,7 +132,7 @@ class SyncPlayClient(QMainWindow):
         control_layout.addWidget(QLabel("Subs:"))
         control_layout.addWidget(self.cb_subtitles)
         control_layout.addWidget(self.btn_toggle_sidebar)
-        left_layout.addLayout(control_layout)
+        control_layout.addWidget(self.btn_fullscreen)
         
         # Initialize MPV
         locale.setlocale(locale.LC_NUMERIC, 'C') # required by mpv
@@ -187,6 +196,7 @@ class SyncPlayClient(QMainWindow):
         self.btn_play_pause.clicked.connect(self.toggle_playback)
         self.slider.sliderMoved.connect(self.seek_video)
         self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
+        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
         self.cb_subtitles.currentIndexChanged.connect(self.change_subtitle_track)
         
@@ -206,6 +216,16 @@ class SyncPlayClient(QMainWindow):
 
     def toggle_sidebar(self):
         self.right_panel.setVisible(not self.right_panel.isVisible())
+
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+            self.control_widget.setVisible(True)
+            self.right_panel.setVisible(True)
+        else:
+            self.showFullScreen()
+            self.control_widget.setVisible(False)
+            self.right_panel.setVisible(False)
 
     def toggle_playback(self):
         if self.player.pause is not None:
@@ -401,9 +421,35 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self.player.play(item.text())
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self.toggle_playback()
+        elif event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+            self.toggle_fullscreen()
+        else:
+            super().keyPressEvent(event)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # Enable Dark Mode
+    app.setStyle("Fusion")
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, Qt.GlobalColor.black)
+    palette.setColor(QPalette.ColorRole.ToolTipText, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.Text, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ButtonText, Qt.GlobalColor.white)
+    palette.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
+    palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black)
+    app.setPalette(palette)
+    
     window = SyncPlayClient()
     window.show()
     sys.exit(app.exec())
