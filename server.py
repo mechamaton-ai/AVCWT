@@ -11,13 +11,22 @@ class SyncServer:
         self.host = "0.0.0.0"
         self.port = 8765
 
+    async def broadcast_user_count(self):
+        if self.clients:
+            message = json.dumps({"action": "user_count", "count": len(self.clients)})
+            tasks = [asyncio.create_task(client.send(message)) for client in self.clients]
+            if tasks:
+                await asyncio.wait(tasks)
+
     async def register(self, websocket):
         self.clients.add(websocket)
         logging.info(f"Client connected. Total clients: {len(self.clients)}")
+        await self.broadcast_user_count()
 
     async def unregister(self, websocket):
         self.clients.remove(websocket)
         logging.info(f"Client disconnected. Total clients: {len(self.clients)}")
+        await self.broadcast_user_count()
 
     async def handler(self, websocket, path):
         await self.register(websocket)

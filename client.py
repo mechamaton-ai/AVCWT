@@ -4,9 +4,9 @@ import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
-                             QComboBox)
+                             QComboBox, QSpinBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
-from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
 os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
@@ -165,9 +165,27 @@ class SyncPlayClient(QMainWindow):
         self.btn_remove_file.clicked.connect(self.remove_file)
         self.file_list.itemDoubleClicked.connect(self.play_file)
 
-        # --- Network Controls ---
+        # --- Settings & Network Controls ---
         right_layout.addSpacing(20)
-        right_layout.addWidget(QLabel("Network Connection"))
+        
+        # Cache Setting
+        cache_layout = QHBoxLayout()
+        cache_layout.addWidget(QLabel("Network Cache (MB):"))
+        self.spin_cache = QSpinBox()
+        self.spin_cache.setRange(10, 2000)
+        self.spin_cache.setValue(150) # Default to 150MB
+        cache_layout.addWidget(self.spin_cache)
+        right_layout.addLayout(cache_layout)
+        
+        right_layout.addSpacing(10)
+        
+        # Network Connection
+        net_header_layout = QHBoxLayout()
+        net_header_layout.addWidget(QLabel("Network Connection"))
+        self.lbl_viewers = QLabel("Viewers: 0")
+        self.lbl_viewers.setAlignment(Qt.AlignmentFlag.AlignRight)
+        net_header_layout.addWidget(self.lbl_viewers)
+        right_layout.addLayout(net_header_layout)
         
         self.ip_input = QLineEdit()
         self.ip_input.setPlaceholderText("ws://localhost:8765")
@@ -199,6 +217,7 @@ class SyncPlayClient(QMainWindow):
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
         self.cb_subtitles.currentIndexChanged.connect(self.change_subtitle_track)
+        self.spin_cache.valueChanged.connect(self.update_cache_size)
         
         # Mpv Thread Signals to GUI
         self.mpv_signals = MpvSignals()
@@ -213,6 +232,19 @@ class SyncPlayClient(QMainWindow):
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
         self.player.observe_property('duration', self.on_mpv_duration)
         self.player.observe_property('track-list', self.on_mpv_track_list)
+        
+        # Global Shortcuts
+        self.shortcut_space = QShortcut(QKeySequence("Space"), self)
+        self.shortcut_space.activated.connect(self.toggle_playback)
+
+    def update_cache_size(self, value_mb):
+        bytes_val = value_mb * 1024 * 1024
+        # Apply to player properties (python-mpv accesses these directly)
+        try:
+            self.player.demuxer_max_bytes = bytes_val
+            self.player.demuxer_max_back_bytes = bytes_val
+        except AttributeError:
+            pass # Failsafe if player is not fully initialized
 
     def toggle_sidebar(self):
         self.right_panel.setVisible(not self.right_panel.isVisible())
@@ -329,7 +361,10 @@ class SyncPlayClient(QMainWindow):
     def handle_network_message(self, data):
         action = data.get('action')
         
-        if action == 'pause':
+        if action == 'user_count':
+            self.lbl_viewers.setText(f"Viewers: {data.get('count', 0)}")
+            
+        elif action == 'pause':
             self.ignore_next_pause = True
             self.player.pause = data.get('state', True)
             
@@ -422,9 +457,7 @@ class SyncPlayClient(QMainWindow):
         self.player.play(item.text())
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Space:
-            self.toggle_playback()
-        elif event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
             self.toggle_fullscreen()
         else:
             super().keyPressEvent(event)
