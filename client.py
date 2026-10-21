@@ -3,7 +3,7 @@ import os
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
-                             QLabel, QLineEdit)
+                             QLabel, QLineEdit, QInputDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
@@ -105,12 +105,15 @@ class SyncPlayClient(QMainWindow):
 
         btn_layout = QHBoxLayout()
         self.btn_add_file = QPushButton("Add File")
-        self.btn_remove_file = QPushButton("Remove File")
+        self.btn_add_url = QPushButton("Add URL")
+        self.btn_remove_file = QPushButton("Remove")
         btn_layout.addWidget(self.btn_add_file)
+        btn_layout.addWidget(self.btn_add_url)
         btn_layout.addWidget(self.btn_remove_file)
         right_layout.addLayout(btn_layout)
         
         self.btn_add_file.clicked.connect(self.add_file)
+        self.btn_add_url.clicked.connect(self.add_url)
         self.btn_remove_file.clicked.connect(self.remove_file)
         self.file_list.itemDoubleClicked.connect(self.play_file)
 
@@ -223,6 +226,11 @@ class SyncPlayClient(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Video File", "", "Video Files (*.mp4 *.mkv *.avi *.webm);;All Files (*)")
         if file_path:
             self.file_list.addItem(file_path)
+
+    def add_url(self):
+        url, ok = QInputDialog.getText(self, "Add URL", "Enter Media URL:")
+        if ok and url:
+            self.file_list.addItem(url)
 
     def remove_file(self):
         selected = self.file_list.selectedItems()
