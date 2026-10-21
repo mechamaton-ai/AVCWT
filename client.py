@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
                              QComboBox, QSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
@@ -431,7 +431,8 @@ class SyncPlayClient(QMainWindow):
             self.btn_host.setEnabled(False)
             self.btn_host.setText("Hosting...")
             self.ip_input.setText("ws://localhost:8765")
-            self.connect_to_server()
+            # Wait 1s for the server to spin up and bind the port before connecting
+            QTimer.singleShot(1000, self.connect_to_server)
 
     def add_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Video File", "", "Video Files (*.mp4 *.mkv *.avi *.webm);;All Files (*)")
