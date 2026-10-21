@@ -1,10 +1,15 @@
 import sys
+import os
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+
+# Add the script directory to the PATH to find mpv-*.dll on Windows
+os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
 import mpv
+
 import threading
 import asyncio
 import websockets
