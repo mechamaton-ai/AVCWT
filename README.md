@@ -1,4 +1,4 @@
-# SyncPlay Clone
+# AVCWT
 
 A Python-based desktop application for synchronizing media playback across multiple users over the network. 
 
