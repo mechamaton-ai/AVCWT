@@ -81,7 +81,7 @@ class WebSocketThread(QThread):
 class SyncPlayClient(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SyncPlay Clone")
+        self.setWindowTitle("AVCWT")
         self.resize(800, 600)
 
         # Main Widget and Layout
