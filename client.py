@@ -108,6 +108,11 @@ class SyncPlayClient(QMainWindow):
         self.slider.setRange(0, 1000)
         self.slider.setEnabled(False)
         
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setFixedWidth(100)
+
         self.cb_audio = QComboBox()
         self.cb_audio.setFixedWidth(100)
         self.cb_subtitles = QComboBox()
@@ -127,6 +132,7 @@ class SyncPlayClient(QMainWindow):
         control_layout.addWidget(self.btn_play_pause)
         control_layout.addWidget(self.slider)
         control_layout.addWidget(self.lbl_time)
+        control_layout.addWidget(self.volume_slider)
         control_layout.addWidget(QLabel("Audio:"))
         control_layout.addWidget(self.cb_audio)
         control_layout.addWidget(QLabel("Subs:"))
@@ -211,6 +217,7 @@ class SyncPlayClient(QMainWindow):
         # Control bar signals
         self.btn_play_pause.clicked.connect(self.toggle_playback)
         self.slider.sliderMoved.connect(self.seek_video)
+        self.volume_slider.valueChanged.connect(self.change_volume)
         self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
@@ -257,6 +264,9 @@ class SyncPlayClient(QMainWindow):
             self.showFullScreen()
             self.control_widget.setVisible(False)
             self.right_panel.setVisible(False)
+
+    def change_volume(self, value):
+        self.player.volume = value
 
     def toggle_playback(self):
         if self.player.pause is not None:
