@@ -439,6 +439,7 @@ class SyncPlayClient(QMainWindow):
             item = QListWidgetItem(url)
             self.file_list.addItem(item)
             self.file_list.setCurrentItem(item)
+            self.play_file(item)
 
     def remove_file(self):
         selected = self.file_list.selectedItems()
@@ -446,6 +447,7 @@ class SyncPlayClient(QMainWindow):
             return
         for item in selected:
             self.file_list.takeItem(self.file_list.row(item))
+            self.player.command('stop')
 
     def play_file(self, item):
         self.player.pause = True
