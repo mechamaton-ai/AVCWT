@@ -42,7 +42,7 @@ class MpvContainer(QWidget):
 
     def mousePressEvent(self, event):
         if self.player:
-            button_map = {Qt.MouseButton.LeftButton: 'MOUSE_BTN0', Qt.MouseButton.RightButton: 'MOUSE_BTN2', Qt.MouseButton.MiddleButton: 'MOUSE_BTN1'}
+            button_map = {Qt.MouseButton.LeftButton: 'MBTN_LEFT', Qt.MouseButton.RightButton: 'MBTN_RIGHT', Qt.MouseButton.MiddleButton: 'MBTN_MID'}
             btn = button_map.get(event.button())
             if btn:
                 self.player.command('keydown', btn)
@@ -50,7 +50,7 @@ class MpvContainer(QWidget):
 
     def mouseReleaseEvent(self, event):
         if self.player:
-            button_map = {Qt.MouseButton.LeftButton: 'MOUSE_BTN0', Qt.MouseButton.RightButton: 'MOUSE_BTN2', Qt.MouseButton.MiddleButton: 'MOUSE_BTN1'}
+            button_map = {Qt.MouseButton.LeftButton: 'MBTN_LEFT', Qt.MouseButton.RightButton: 'MBTN_RIGHT', Qt.MouseButton.MiddleButton: 'MBTN_MID'}
             btn = button_map.get(event.button())
             if btn:
                 self.player.command('keyup', btn)
