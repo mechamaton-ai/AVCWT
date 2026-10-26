@@ -42,18 +42,13 @@ class MpvContainer(QWidget):
 
     def mousePressEvent(self, event):
         if self.player:
-            button_map = {Qt.MouseButton.LeftButton: 'MBTN_LEFT', Qt.MouseButton.RightButton: 'MBTN_RIGHT', Qt.MouseButton.MiddleButton: 'MBTN_MID'}
+            button_map = {Qt.MouseButton.LeftButton: 0, Qt.MouseButton.RightButton: 2, Qt.MouseButton.MiddleButton: 1}
             btn = button_map.get(event.button())
-            if btn:
-                self.player.command('keydown', btn)
+            if btn is not None:
+                self.player.command('mouse', int(event.position().x()), int(event.position().y()), btn, 'single')
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self.player:
-            button_map = {Qt.MouseButton.LeftButton: 'MBTN_LEFT', Qt.MouseButton.RightButton: 'MBTN_RIGHT', Qt.MouseButton.MiddleButton: 'MBTN_MID'}
-            btn = button_map.get(event.button())
-            if btn:
-                self.player.command('keyup', btn)
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event):
@@ -147,7 +142,7 @@ class SyncPlayClient(QMainWindow):
         mpv_args = {
             'wid': str(int(self.video_container.winId())),
             'profile': 'pseudo-gui',
-            'script_opts': 'osc-layout=box,osc-seekbarstyle=bar,osc-deadzonesize=0,osc-minmousemove=3',
+            'script_opts': 'osc-seekbarstyle=bar,osc-deadzonesize=0,osc-minmousemove=3',
             'input_default_bindings': True,
             'input_vo_keyboard': True,
             'osc': True,
