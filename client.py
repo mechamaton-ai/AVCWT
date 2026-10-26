@@ -42,13 +42,18 @@ class MpvContainer(QWidget):
 
     def mousePressEvent(self, event):
         if self.player:
-            button_map = {Qt.MouseButton.LeftButton: 0, Qt.MouseButton.RightButton: 2, Qt.MouseButton.MiddleButton: 1}
+            button_map = {Qt.MouseButton.LeftButton: 'MBTN_LEFT', Qt.MouseButton.RightButton: 'MBTN_RIGHT', Qt.MouseButton.MiddleButton: 'MBTN_MID'}
             btn = button_map.get(event.button())
-            if btn is not None:
-                self.player.command('mouse', int(event.position().x()), int(event.position().y()), btn, 'single')
+            if btn:
+                self.player.command('keydown', btn)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self.player:
+            button_map = {Qt.MouseButton.LeftButton: 'MBTN_LEFT', Qt.MouseButton.RightButton: 'MBTN_RIGHT', Qt.MouseButton.MiddleButton: 'MBTN_MID'}
+            btn = button_map.get(event.button())
+            if btn:
+                self.player.command('keyup', btn)
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event):
