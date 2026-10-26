@@ -22,7 +22,97 @@ class MpvSignals(QObject):
     time_pos_changed = pyqtSignal(float)
     duration_changed = pyqtSignal(float)
     pause_changed = pyqtSignal(bool)
-    track_list_changed = pyqtSignal(list)
+
+class OscOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedHeight(50)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: rgba(30, 30, 30, 180);
+                color: white;
+                border-radius: 5px;
+            }
+            QPushButton {
+                background: transparent;
+                border: none;
+                font-size: 18px;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 30);
+                border-radius: 3px;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #999999;
+                height: 4px;
+                background: #666666;
+                margin: 2px 0;
+            }
+            QSlider::handle:horizontal {
+                background: white;
+                border: 1px solid #5c5c5c;
+                width: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #42A5F5;
+            }
+        """)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(10)
+
+        self.btn_play_pause = QPushButton("▶")
+        self.btn_play_pause.setFixedWidth(30)
+
+        self.btn_prev = QPushButton("⏮")
+        self.btn_prev.setFixedWidth(30)
+
+        self.btn_next = QPushButton("⏭")
+        self.btn_next.setFixedWidth(30)
+
+        self.lbl_time = QLabel("00:00:00")
+        self.lbl_time.setStyleSheet("background: transparent;")
+
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(0, 1000)
+        self.slider.setEnabled(False)
+        self.slider.setStyleSheet("background: transparent;")
+
+        self.lbl_duration = QLabel("00:00:00")
+        self.lbl_duration.setStyleSheet("background: transparent;")
+
+        self.btn_audio = QPushButton("🔉")
+        self.btn_audio.setFixedWidth(30)
+        self.btn_audio.setToolTip("Cycle Audio")
+
+        self.btn_sub = QPushButton("💬")
+        self.btn_sub.setFixedWidth(30)
+        self.btn_sub.setToolTip("Cycle Subtitles")
+
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.setStyleSheet("background: transparent;")
+
+        self.btn_fullscreen = QPushButton("⛶")
+        self.btn_fullscreen.setFixedWidth(30)
+
+        layout.addWidget(self.btn_play_pause)
+        layout.addWidget(self.btn_prev)
+        layout.addWidget(self.btn_next)
+        layout.addWidget(self.lbl_time)
+        layout.addWidget(self.slider)
+        layout.addWidget(self.lbl_duration)
+        layout.addWidget(self.btn_audio)
+        layout.addWidget(self.btn_sub)
+        layout.addWidget(self.volume_slider)
+        layout.addWidget(self.btn_fullscreen)
 
 class MpvContainer(QWidget):
     def __init__(self, parent=None):
@@ -32,15 +122,37 @@ class MpvContainer(QWidget):
         self.setMouseTracking(True)
         self.player = None
 
+        self.overlay = OscOverlay(self)
+        self.overlay.hide()
+
+        self.hide_timer = QTimer(self)
+        self.hide_timer.setInterval(2000)
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self.overlay.hide)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Position overlay at the bottom, centered, with a small margin
+        overlay_width = min(self.width() - 40, 800)
+        x = (self.width() - overlay_width) // 2
+        y = self.height() - self.overlay.height() - 20
+        self.overlay.setGeometry(x, y, overlay_width, self.overlay.height())
+
     def set_player(self, player):
         self.player = player
 
     def mouseMoveEvent(self, event):
         if self.player:
             self.player.command('mouse', int(event.position().x()), int(event.position().y()))
+            if not self.overlay.isVisible():
+                self.overlay.show()
+            self.hide_timer.start()
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event):
+        # We handle overlay clicks internally in OscOverlay,
+        # but if the user clicks the video we can toggle play/pause natively,
+        # or just pass it through.
         if self.player:
             button_map = {Qt.MouseButton.LeftButton: 'MBTN_LEFT', Qt.MouseButton.RightButton: 'MBTN_RIGHT', Qt.MouseButton.MiddleButton: 'MBTN_MID'}
             btn = button_map.get(event.button())
@@ -146,11 +258,9 @@ class SyncPlayClient(QMainWindow):
 
         mpv_args = {
             'wid': str(int(self.video_container.winId())),
-            'profile': 'pseudo-gui',
-            'script_opts': 'osc-seekbarstyle=bar,osc-deadzonesize=0,osc-minmousemove=3',
             'input_default_bindings': True,
             'input_vo_keyboard': True,
-            'osc': True,
+            'osc': False,
             'hwdec': 'auto',
             'cache': 'yes'
         }
@@ -159,6 +269,16 @@ class SyncPlayClient(QMainWindow):
 
         self.player = mpv.MPV(**mpv_args)
         self.video_container.set_player(self.player)
+
+        # Connect overlay controls
+        self.video_container.overlay.btn_play_pause.clicked.connect(self.toggle_playback)
+        self.video_container.overlay.btn_prev.clicked.connect(lambda: self.player.command('playlist-prev'))
+        self.video_container.overlay.btn_next.clicked.connect(lambda: self.player.command('playlist-next'))
+        self.video_container.overlay.slider.sliderMoved.connect(self.seek_video)
+        self.video_container.overlay.volume_slider.valueChanged.connect(self.change_volume)
+        self.video_container.overlay.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
+        self.video_container.overlay.btn_audio.clicked.connect(lambda: self.player.command('cycle', 'audio'))
+        self.video_container.overlay.btn_sub.clicked.connect(lambda: self.player.command('cycle', 'sub'))
 
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
@@ -229,13 +349,54 @@ class SyncPlayClient(QMainWindow):
         # Signals
         self.spin_cache.valueChanged.connect(self.update_cache_size)
         
+        # Mpv Thread Signals to GUI
+        self.mpv_signals = MpvSignals()
+        self.mpv_signals.time_pos_changed.connect(self.update_ui_time)
+        self.mpv_signals.duration_changed.connect(self.update_ui_duration)
+        self.mpv_signals.pause_changed.connect(self.update_ui_pause)
+        self._current_duration = 0.0
+
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
+        self.player.observe_property('duration', self.on_mpv_duration)
         
         # Global Shortcuts
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
         self.shortcut_space.activated.connect(self.toggle_playback)
+
+    def seek_video(self, value):
+        if self._current_duration > 0:
+            new_pos = (value / 1000.0) * self._current_duration
+            self.player.time_pos = new_pos
+
+    def change_volume(self, value):
+        self.player.volume = value
+
+    def format_time(self, seconds):
+        if seconds is None:
+            return "00:00:00"
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def update_ui_time(self, time_pos):
+        if self._current_duration > 0:
+            self.video_container.overlay.slider.blockSignals(True)
+            self.video_container.overlay.slider.setValue(int((time_pos / self._current_duration) * 1000))
+            self.video_container.overlay.slider.blockSignals(False)
+        self.video_container.overlay.lbl_time.setText(self.format_time(time_pos))
+
+    def update_ui_duration(self, duration):
+        self._current_duration = duration
+        if duration > 0:
+            self.video_container.overlay.slider.setEnabled(True)
+        else:
+            self.video_container.overlay.slider.setEnabled(False)
+        self.video_container.overlay.lbl_duration.setText(self.format_time(self._current_duration))
+
+    def update_ui_pause(self, is_paused):
+        self.video_container.overlay.btn_play_pause.setText("▶" if is_paused else "⏸")
 
     def update_cache_size(self, value_mb):
         bytes_val = value_mb * 1024 * 1024
@@ -292,6 +453,9 @@ class SyncPlayClient(QMainWindow):
                 self.player.time_pos = position
 
     def on_mpv_pause(self, _name, value):
+        if value is not None:
+            self.mpv_signals.pause_changed.emit(value)
+
         if self.ignore_next_pause:
             self.ignore_next_pause = False
             return
@@ -302,7 +466,14 @@ class SyncPlayClient(QMainWindow):
                 'state': value
             })
 
+    def on_mpv_duration(self, _name, value):
+        if value is not None:
+            self.mpv_signals.duration_changed.emit(value)
+
     def on_mpv_time_pos(self, _name, value):
+        if value is not None:
+            self.mpv_signals.time_pos_changed.emit(value)
+
         if self.ignore_next_seek:
             # We don't reset ignore_next_seek here immediately because time-pos
             # updates constantly. We'll let a small tolerance handle it, or 
