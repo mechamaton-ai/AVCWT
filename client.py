@@ -24,6 +24,49 @@ class MpvSignals(QObject):
     pause_changed = pyqtSignal(bool)
     track_list_changed = pyqtSignal(list)
 
+class MpvContainer(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
+        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        self.setMouseTracking(True)
+        self.player = None
+
+    def set_player(self, player):
+        self.player = player
+
+    def mouseMoveEvent(self, event):
+        if self.player:
+            self.player.command('mouse', int(event.position().x()), int(event.position().y()))
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        if self.player:
+            button_map = {Qt.MouseButton.LeftButton: 'MOUSE_BTN0', Qt.MouseButton.RightButton: 'MOUSE_BTN2', Qt.MouseButton.MiddleButton: 'MOUSE_BTN1'}
+            btn = button_map.get(event.button())
+            if btn:
+                self.player.command('keydown', btn)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.player:
+            button_map = {Qt.MouseButton.LeftButton: 'MOUSE_BTN0', Qt.MouseButton.RightButton: 'MOUSE_BTN2', Qt.MouseButton.MiddleButton: 'MOUSE_BTN1'}
+            btn = button_map.get(event.button())
+            if btn:
+                self.player.command('keyup', btn)
+        super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event):
+        if self.player:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self.player.command('keydown', 'WHEEL_UP')
+                self.player.command('keyup', 'WHEEL_UP')
+            elif delta < 0:
+                self.player.command('keydown', 'WHEEL_DOWN')
+                self.player.command('keyup', 'WHEEL_DOWN')
+        super().wheelEvent(event)
+
 class WebSocketThread(QThread):
     message_received = pyqtSignal(dict)
     connection_status = pyqtSignal(bool)
@@ -94,59 +137,28 @@ class SyncPlayClient(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
         main_layout.addWidget(left_panel, stretch=3)
 
-        self.video_container = QWidget()
+        self.video_container = MpvContainer()
         self.video_container.setStyleSheet("background-color: black;")
         left_layout.addWidget(self.video_container, stretch=1)
         
-        # Player Controls Bar
-        control_layout = QHBoxLayout()
-        self.btn_play_pause = QPushButton("Play")
-        self.btn_play_pause.setFixedWidth(60)
-        self.lbl_time = QLabel("00:00 / 00:00")
-        
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(0, 1000)
-        self.slider.setEnabled(False)
-        
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(100)
-        self.volume_slider.setFixedWidth(100)
-
-        self.cb_audio = QComboBox()
-        self.cb_audio.setFixedWidth(100)
-        self.cb_subtitles = QComboBox()
-        self.cb_subtitles.setFixedWidth(100)
-        
-        self.btn_toggle_sidebar = QPushButton("☰")
-        self.btn_toggle_sidebar.setFixedWidth(30)
-        
-        self.btn_fullscreen = QPushButton("⛶")
-        self.btn_fullscreen.setFixedWidth(30)
-        
-        # We need the control bar widget to be hideable
-        self.control_widget = QWidget()
-        self.control_widget.setLayout(control_layout)
-        left_layout.addWidget(self.control_widget)
-        
-        control_layout.addWidget(self.btn_play_pause)
-        control_layout.addWidget(self.slider)
-        control_layout.addWidget(self.lbl_time)
-        control_layout.addWidget(self.volume_slider)
-        control_layout.addWidget(QLabel("Audio:"))
-        control_layout.addWidget(self.cb_audio)
-        control_layout.addWidget(QLabel("Subs:"))
-        control_layout.addWidget(self.cb_subtitles)
-        control_layout.addWidget(self.btn_toggle_sidebar)
-        control_layout.addWidget(self.btn_fullscreen)
-        
         # Initialize MPV
         locale.setlocale(locale.LC_NUMERIC, 'C') # required by mpv
-        self.player = mpv.MPV(wid=str(int(self.video_container.winId())),
-                              input_default_bindings=True,
-                              input_vo_keyboard=True,
-                              osc=True,
-                              cache="yes")
+
+        mpv_args = {
+            'wid': str(int(self.video_container.winId())),
+            'profile': 'pseudo-gui',
+            'script_opts': 'osc-layout=box,osc-seekbarstyle=bar,osc-deadzonesize=0,osc-minmousemove=3',
+            'input_default_bindings': True,
+            'input_vo_keyboard': True,
+            'osc': True,
+            'hwdec': 'auto',
+            'cache': 'yes'
+        }
+        if sys.platform.startswith('linux'):
+            mpv_args['vo'] = 'x11'
+
+        self.player = mpv.MPV(**mpv_args)
+        self.video_container.set_player(self.player)
 
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
@@ -214,29 +226,12 @@ class SyncPlayClient(QMainWindow):
         self.ignore_next_seek = False
         self.ignore_next_pause = False
         
-        # Control bar signals
-        self.btn_play_pause.clicked.connect(self.toggle_playback)
-        self.slider.sliderMoved.connect(self.seek_video)
-        self.volume_slider.valueChanged.connect(self.change_volume)
-        self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
-        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
-        self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
-        self.cb_subtitles.currentIndexChanged.connect(self.change_subtitle_track)
+        # Signals
         self.spin_cache.valueChanged.connect(self.update_cache_size)
         
-        # Mpv Thread Signals to GUI
-        self.mpv_signals = MpvSignals()
-        self.mpv_signals.time_pos_changed.connect(self.update_ui_time)
-        self.mpv_signals.duration_changed.connect(self.update_ui_duration)
-        self.mpv_signals.pause_changed.connect(self.update_ui_pause)
-        self.mpv_signals.track_list_changed.connect(self.update_ui_tracks)
-        self._current_duration = 0.0
-
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
-        self.player.observe_property('duration', self.on_mpv_duration)
-        self.player.observe_property('track-list', self.on_mpv_track_list)
         
         # Global Shortcuts
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
@@ -252,104 +247,17 @@ class SyncPlayClient(QMainWindow):
         except AttributeError:
             pass # Failsafe if player is not fully initialized
 
-    def toggle_sidebar(self):
-        self.right_panel.setVisible(not self.right_panel.isVisible())
-
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showNormal()
-            self.control_widget.setVisible(True)
             self.right_panel.setVisible(True)
         else:
             self.showFullScreen()
-            self.control_widget.setVisible(False)
             self.right_panel.setVisible(False)
-
-    def change_volume(self, value):
-        self.player.volume = value
 
     def toggle_playback(self):
         if self.player.pause is not None:
             self.player.pause = not self.player.pause
-
-    def seek_video(self, value):
-        if self._current_duration > 0:
-            new_pos = (value / 1000.0) * self._current_duration
-            self.player.time_pos = new_pos
-
-    def format_time(self, seconds):
-        if seconds is None:
-            return "00:00"
-        m, s = divmod(int(seconds), 60)
-        h, m = divmod(m, 60)
-        if h > 0:
-            return f"{h:02d}:{m:02d}:{s:02d}"
-        return f"{m:02d}:{s:02d}"
-
-    def update_ui_time(self, time_pos):
-        if self._current_duration > 0:
-            self.slider.blockSignals(True)
-            self.slider.setValue(int((time_pos / self._current_duration) * 1000))
-            self.slider.blockSignals(False)
-        self.lbl_time.setText(f"{self.format_time(time_pos)} / {self.format_time(self._current_duration)}")
-
-    def update_ui_duration(self, duration):
-        self._current_duration = duration
-        if duration > 0:
-            self.slider.setEnabled(True)
-        else:
-            self.slider.setEnabled(False)
-
-    def update_ui_pause(self, is_paused):
-        self.btn_play_pause.setText("Play" if is_paused else "Pause")
-
-    def change_audio_track(self, index):
-        track_id = self.cb_audio.itemData(index)
-        if track_id is None:
-            self.player.aid = "no"
-        else:
-            self.player.aid = track_id
-
-    def change_subtitle_track(self, index):
-        track_id = self.cb_subtitles.itemData(index)
-        if track_id is None:
-            self.player.sid = "no"
-        else:
-            self.player.sid = track_id
-
-    def update_ui_tracks(self, tracks):
-        # We need to temporarily block signals so updating the combo boxes 
-        # doesn't trigger a switch command.
-        self.cb_audio.blockSignals(True)
-        self.cb_subtitles.blockSignals(True)
-        
-        self.cb_audio.clear()
-        self.cb_subtitles.clear()
-        
-        self.cb_audio.addItem("None", None)
-        self.cb_subtitles.addItem("None", None)
-        
-        audio_idx = 0
-        sub_idx = 0
-        
-        for track in tracks:
-            # Type is 'audio', 'sub', or 'video'
-            if track.get('type') == 'audio':
-                title = track.get('title') or track.get('lang') or f"Audio {track.get('id')}"
-                self.cb_audio.addItem(title, track.get('id'))
-                if track.get('selected'):
-                    audio_idx = self.cb_audio.count() - 1
-            elif track.get('type') == 'sub':
-                title = track.get('title') or track.get('lang') or f"Sub {track.get('id')}"
-                self.cb_subtitles.addItem(title, track.get('id'))
-                if track.get('selected'):
-                    sub_idx = self.cb_subtitles.count() - 1
-                    
-        self.cb_audio.setCurrentIndex(audio_idx)
-        self.cb_subtitles.setCurrentIndex(sub_idx)
-        
-        self.cb_audio.blockSignals(False)
-        self.cb_subtitles.blockSignals(False)
 
     def connect_to_server(self):
         uri = self.ip_input.text()
@@ -384,9 +292,6 @@ class SyncPlayClient(QMainWindow):
                 self.player.time_pos = position
 
     def on_mpv_pause(self, _name, value):
-        if value is not None:
-            self.mpv_signals.pause_changed.emit(value)
-            
         if self.ignore_next_pause:
             self.ignore_next_pause = False
             return
@@ -397,18 +302,7 @@ class SyncPlayClient(QMainWindow):
                 'state': value
             })
 
-    def on_mpv_duration(self, _name, value):
-        if value is not None:
-            self.mpv_signals.duration_changed.emit(value)
-
-    def on_mpv_track_list(self, _name, value):
-        if value is not None:
-            self.mpv_signals.track_list_changed.emit(value)
-
     def on_mpv_time_pos(self, _name, value):
-        if value is not None:
-            self.mpv_signals.time_pos_changed.emit(value)
-            
         if self.ignore_next_seek:
             # We don't reset ignore_next_seek here immediately because time-pos
             # updates constantly. We'll let a small tolerance handle it, or 
