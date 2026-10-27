@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint, QUrl
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEngineProfile
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
 os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
@@ -216,6 +217,10 @@ class SyncPlayClient(QMainWindow):
         self.player_stack.addWidget(self.video_container)
 
         self.web_view = QWebEngineView()
+        # Set a standard user agent to avoid being blocked by YouTube (Error 153)
+        profile = self.web_view.page().profile()
+        profile.setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
         self.player_stack.addWidget(self.web_view)
         
         # Initialize OSC overlay
@@ -463,22 +468,25 @@ class SyncPlayClient(QMainWindow):
 
     def toggle_playback(self):
         if self.player_stack.currentWidget() == self.web_view:
-            # We must use JS to toggle playback for web engine.
-            # Easiest way is to attempt to click a video tag or invoke play/pause on it.
+            # We must use JS to toggle playback for web engine and extract its new state.
             js = """
-            var v = document.querySelector('video');
-            if(v) {
-                if(v.paused) v.play();
-                else v.pause();
-            }
+            (function() {
+                var v = document.querySelector('video');
+                if(v) {
+                    if(v.paused) { v.play(); return false; }
+                    else { v.pause(); return true; }
+                }
+                return false;
+            })();
             """
-            self.web_view.page().runJavaScript(js)
-            # Send sync state proactively since we lack property observers for web
-            if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
-                self.ws_thread.send_message({
-                    'action': 'pause',
-                    'state': False # Simplified assuming it plays
-                })
+            def _handle_js_result(is_paused):
+                if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                    self.ws_thread.send_message({
+                        'action': 'pause',
+                        'state': is_paused
+                    })
+
+            self.web_view.page().runJavaScript(js, _handle_js_result)
         else:
             if self.player.pause is not None:
                 self.player.pause = not self.player.pause
@@ -486,7 +494,16 @@ class SyncPlayClient(QMainWindow):
     def seek_video(self, value):
         if self._current_duration > 0:
             new_pos = (value / 1000.0) * self._current_duration
-            self.player.time_pos = new_pos
+            if self.player_stack.currentWidget() == self.web_view:
+                js = f"var v = document.querySelector('video'); if(v) {{ v.currentTime = {new_pos}; }}"
+                self.web_view.page().runJavaScript(js)
+                if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                    self.ws_thread.send_message({
+                        'action': 'seek',
+                        'position': new_pos
+                    })
+            else:
+                self.player.time_pos = new_pos
 
     def format_time(self, seconds):
         if seconds is None:
@@ -599,11 +616,15 @@ class SyncPlayClient(QMainWindow):
             self.ignore_next_seek = True
             position = data.get('position', 0)
 
-            # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
-            if self.player.time_pos is None:
-                self._pending_seek = position
-            elif abs(self.player.time_pos - position) > 1.0:
-                self.player.time_pos = position
+            if self.player_stack.currentWidget() == self.web_view:
+                js = f"var v = document.querySelector('video'); if(v) {{ v.currentTime = {position}; }}"
+                self.web_view.page().runJavaScript(js)
+            else:
+                # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
+                if self.player.time_pos is None:
+                    self._pending_seek = position
+                elif abs(self.player.time_pos - position) > 1.0:
+                    self.player.time_pos = position
 
         elif action == 'playlist':
             urls = data.get('urls', [])
