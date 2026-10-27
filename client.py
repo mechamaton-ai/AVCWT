@@ -559,6 +559,12 @@ class SyncPlayClient(QMainWindow):
             if self.player.time_pos is not None and abs(self.player.time_pos - position) > 1.0:
                 self.player.time_pos = position
 
+        elif action == 'play':
+            url = data.get('url')
+            if url:
+                self.player.pause = True
+                self.player.play(url)
+
     def on_mpv_pause(self, _name, value):
         if value is not None:
             self.mpv_signals.pause_changed.emit(value)
@@ -638,6 +644,10 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self.player.pause = True
         self.player.play(item.text())
+        self.ws_thread.send_message({
+            'action': 'play',
+            'url': item.text()
+        })
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
