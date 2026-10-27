@@ -340,7 +340,9 @@ class SyncPlayClient(QMainWindow):
         
         self.ignore_next_seek = False
         self.ignore_next_pause = False
-        
+        self._pending_seek = None
+        self._last_sync_time = 0.0
+
         self.is_host = False
 
         # Control bar signals
@@ -563,7 +565,11 @@ class SyncPlayClient(QMainWindow):
         elif action == 'seek':
             self.ignore_next_seek = True
             position = data.get('position', 0)
-            if self.player.time_pos is not None and abs(self.player.time_pos - position) > 1.0:
+
+            # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
+            if self.player.time_pos is None:
+                self._pending_seek = position
+            elif abs(self.player.time_pos - position) > 1.0:
                 self.player.time_pos = position
 
         elif action == 'playlist':
@@ -611,6 +617,10 @@ class SyncPlayClient(QMainWindow):
         if value is not None:
             self.mpv_signals.duration_changed.emit(value)
 
+            if self._pending_seek is not None:
+                self.player.time_pos = self._pending_seek
+                self._pending_seek = None
+
     def on_mpv_track_list(self, _name, value):
         if value is not None:
             self.mpv_signals.track_list_changed.emit(value)
@@ -642,6 +652,13 @@ class SyncPlayClient(QMainWindow):
                             'action': 'seek',
                             'position': value
                         })
+            elif self.is_host and (value - self._last_sync_time) > 1.0:
+                self._last_sync_time = value
+                if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                    self.ws_thread.send_message({
+                        'action': 'time_sync',
+                        'position': value
+                    })
         self._last_time_pos = value
 
     def broadcast_playlist(self):

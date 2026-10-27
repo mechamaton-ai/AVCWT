@@ -75,6 +75,9 @@ class SyncServer:
                 self.is_paused = data.get("state", True)
             elif data.get("action") == "seek":
                 self.current_time = data.get("position", 0.0)
+            elif data.get("action") == "time_sync":
+                self.current_time = data.get("position", 0.0)
+                return  # Do not broadcast time_sync to avoid stuttering clients
 
             # Simple broadcast to all other clients
             if self.clients:
