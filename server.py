@@ -10,6 +10,10 @@ class SyncServer:
         self.clients = set()
         self.host = "0.0.0.0"
         self.port = 8765
+        self.current_url = None
+        self.playlist = []
+        self.current_time = 0.0
+        self.is_paused = True
 
     async def broadcast_user_count(self):
         if self.clients:
@@ -22,6 +26,26 @@ class SyncServer:
         self.clients.add(websocket)
         logging.info(f"Client connected. Total clients: {len(self.clients)}")
         await self.broadcast_user_count()
+
+        if self.playlist:
+            await websocket.send(json.dumps({
+                "action": "playlist",
+                "urls": self.playlist
+            }))
+
+        if self.current_url:
+            await websocket.send(json.dumps({
+                "action": "play",
+                "url": self.current_url
+            }))
+            await websocket.send(json.dumps({
+                "action": "seek",
+                "position": self.current_time
+            }))
+            await websocket.send(json.dumps({
+                "action": "pause",
+                "state": self.is_paused
+            }))
 
     async def unregister(self, websocket):
         self.clients.remove(websocket)
@@ -43,6 +67,18 @@ class SyncServer:
             data = json.loads(message_str)
             logging.info(f"Received message: {data}")
             
+            if data.get("action") == "play":
+                self.current_url = data.get("url")
+            elif data.get("action") == "playlist":
+                self.playlist = data.get("urls", [])
+            elif data.get("action") == "pause":
+                self.is_paused = data.get("state", True)
+            elif data.get("action") == "seek":
+                self.current_time = data.get("position", 0.0)
+            elif data.get("action") == "time_sync":
+                self.current_time = data.get("position", 0.0)
+                return  # Do not broadcast time_sync to avoid stuttering clients
+
             # Simple broadcast to all other clients
             if self.clients:
                 tasks = []

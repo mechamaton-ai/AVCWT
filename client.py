@@ -174,10 +174,13 @@ class WebSocketThread(QThread):
             self.connection_status.emit(False)
 
     def send_message(self, data):
-        if self.ws and self._is_running and self.loop:
-            asyncio.run_coroutine_threadsafe(
-                self.ws.send(json.dumps(data)), self.loop
-            )
+        try:
+            if self.ws and self._is_running and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.ws.send(json.dumps(data)), self.loop
+                )
+        except Exception as e:
+            pass
 
     def stop(self):
         self._is_running = False
@@ -337,7 +340,11 @@ class SyncPlayClient(QMainWindow):
         
         self.ignore_next_seek = False
         self.ignore_next_pause = False
-        
+        self._pending_seek = None
+        self._last_sync_time = 0.0
+
+        self.is_host = False
+
         # Control bar signals
         self.btn_play_pause.clicked.connect(self.toggle_playback)
         self.slider.sliderMoved.connect(self.seek_video)
@@ -538,6 +545,8 @@ class SyncPlayClient(QMainWindow):
         if connected:
             self.btn_connect.setText("Connected")
             self.btn_connect.setStyleSheet("background-color: green; color: white;")
+            if self.is_host:
+                self.broadcast_playlist()
         else:
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("Connect")
@@ -556,8 +565,38 @@ class SyncPlayClient(QMainWindow):
         elif action == 'seek':
             self.ignore_next_seek = True
             position = data.get('position', 0)
-            if self.player.time_pos is not None and abs(self.player.time_pos - position) > 1.0:
+
+            # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
+            if self.player.time_pos is None:
+                self._pending_seek = position
+            elif abs(self.player.time_pos - position) > 1.0:
                 self.player.time_pos = position
+
+        elif action == 'playlist':
+            urls = data.get('urls', [])
+            current_url = None
+            if self.file_list.currentItem():
+                current_url = self.file_list.currentItem().text()
+
+            self.file_list.clear()
+            for url in urls:
+                item = QListWidgetItem(url)
+                self.file_list.addItem(item)
+                if url == current_url:
+                    self.file_list.setCurrentItem(item)
+
+        elif action == 'play':
+            url = data.get('url')
+            if url:
+                items = self.file_list.findItems(url, Qt.MatchFlag.MatchExactly)
+                if not items:
+                    item = QListWidgetItem(url)
+                    self.file_list.addItem(item)
+                    self.file_list.setCurrentItem(item)
+                else:
+                    self.file_list.setCurrentItem(items[0])
+                self.player.pause = True
+                self.player.play(url)
 
     def on_mpv_pause(self, _name, value):
         if value is not None:
@@ -568,14 +607,19 @@ class SyncPlayClient(QMainWindow):
             return
         
         if value is not None:
-            self.ws_thread.send_message({
-                'action': 'pause',
-                'state': value
-            })
+            if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                self.ws_thread.send_message({
+                    'action': 'pause',
+                    'state': value
+                })
 
     def on_mpv_duration(self, _name, value):
         if value is not None:
             self.mpv_signals.duration_changed.emit(value)
+
+            if self._pending_seek is not None:
+                self.player.time_pos = self._pending_seek
+                self._pending_seek = None
 
     def on_mpv_track_list(self, _name, value):
         if value is not None:
@@ -603,14 +647,31 @@ class SyncPlayClient(QMainWindow):
                 if self.ignore_next_seek:
                     self.ignore_next_seek = False
                 else:
+                    if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                        self.ws_thread.send_message({
+                            'action': 'seek',
+                            'position': value
+                        })
+            elif self.is_host and abs(value - self._last_sync_time) > 1.0:
+                self._last_sync_time = value
+                if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
                     self.ws_thread.send_message({
-                        'action': 'seek',
+                        'action': 'time_sync',
                         'position': value
                     })
         self._last_time_pos = value
 
+    def broadcast_playlist(self):
+        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+            urls = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+            self.ws_thread.send_message({
+                'action': 'playlist',
+                'urls': urls
+            })
+
     def host_server(self):
         if self.server_thread is None:
+            self.is_host = True
             self.server_thread = threading.Thread(target=run_server, daemon=True)
             self.server_thread.start()
             self.btn_host.setEnabled(False)
@@ -625,6 +686,7 @@ class SyncPlayClient(QMainWindow):
             item = QListWidgetItem(url)
             self.file_list.addItem(item)
             self.file_list.setCurrentItem(item)
+            self.broadcast_playlist()
             self.play_file(item)
 
     def remove_file(self):
@@ -634,10 +696,16 @@ class SyncPlayClient(QMainWindow):
         for item in selected:
             self.file_list.takeItem(self.file_list.row(item))
             self.player.command('stop')
+        self.broadcast_playlist()
 
     def play_file(self, item):
         self.player.pause = True
         self.player.play(item.text())
+        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+            self.ws_thread.send_message({
+                'action': 'play',
+                'url': item.text()
+            })
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
