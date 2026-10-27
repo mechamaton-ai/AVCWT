@@ -12,6 +12,8 @@ class SyncServer:
         self.port = 8765
         self.current_url = None
         self.playlist = []
+        self.current_time = 0.0
+        self.is_paused = True
 
     async def broadcast_user_count(self):
         if self.clients:
@@ -35,6 +37,14 @@ class SyncServer:
             await websocket.send(json.dumps({
                 "action": "play",
                 "url": self.current_url
+            }))
+            await websocket.send(json.dumps({
+                "action": "seek",
+                "position": self.current_time
+            }))
+            await websocket.send(json.dumps({
+                "action": "pause",
+                "state": self.is_paused
             }))
 
     async def unregister(self, websocket):
@@ -61,6 +71,10 @@ class SyncServer:
                 self.current_url = data.get("url")
             elif data.get("action") == "playlist":
                 self.playlist = data.get("urls", [])
+            elif data.get("action") == "pause":
+                self.is_paused = data.get("state", True)
+            elif data.get("action") == "seek":
+                self.current_time = data.get("position", 0.0)
 
             # Simple broadcast to all other clients
             if self.clients:
