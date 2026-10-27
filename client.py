@@ -26,8 +26,10 @@ class ModernOscOverlay(QWidget):
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
+        self.setMouseTracking(True)
 
         self.bg = QWidget()
+        self.bg.setMouseTracking(True)
         self.bg.setObjectName("bg_container")
         self.bg.setStyleSheet("""
             #bg_container {
@@ -184,12 +186,10 @@ class SyncPlayClient(QMainWindow):
 
         self.cb_audio = QComboBox()
         self.cb_audio.setMaximumWidth(100)
-        self.cb_audio.setMinimumWidth(30)
-        self.cb_audio.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.cb_audio.setMinimumWidth(60)
         self.cb_subtitles = QComboBox()
         self.cb_subtitles.setMaximumWidth(100)
-        self.cb_subtitles.setMinimumWidth(30)
-        self.cb_subtitles.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.cb_subtitles.setMinimumWidth(60)
         
         self.btn_toggle_sidebar = QPushButton("☰")
         self.btn_toggle_sidebar.setMaximumWidth(30)
@@ -325,6 +325,10 @@ class SyncPlayClient(QMainWindow):
         # Global Shortcuts
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
         self.shortcut_space.activated.connect(self.toggle_playback)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_osc_position()
 
     def update_osc_position(self):
         if not self.osc.isVisible():
