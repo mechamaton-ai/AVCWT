@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
                              QComboBox, QSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
@@ -18,11 +18,71 @@ import websockets
 import json
 from server import run_server
 
+class ModernOscOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+
+        self.bg = QWidget()
+        self.bg.setObjectName("bg_container")
+        self.bg.setStyleSheet("""
+            #bg_container {
+                background-color: rgba(30, 30, 30, 200);
+                border-radius: 15px;
+            }
+            QWidget {
+                color: white;
+            }
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                padding: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 30);
+                border-radius: 5px;
+            }
+            QSlider::groove:horizontal {
+                border-radius: 2px;
+                height: 4px;
+                margin: 0px;
+                background-color: rgba(255, 255, 255, 50);
+            }
+            QSlider::handle:horizontal {
+                background-color: white;
+                border: none;
+                height: 12px;
+                width: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::sub-page:horizontal {
+                background-color: #2a82da;
+                border-radius: 2px;
+            }
+            QComboBox {
+                background-color: rgba(50, 50, 50, 150);
+                border: 1px solid rgba(100, 100, 100, 100);
+                border-radius: 4px;
+                padding: 2px 10px 2px 5px;
+            }
+        """)
+
+        self.bg_layout = QHBoxLayout(self.bg)
+        self.bg_layout.setContentsMargins(10, 5, 10, 5)
+        self.layout.addWidget(self.bg)
+
 class MpvSignals(QObject):
     time_pos_changed = pyqtSignal(float)
     duration_changed = pyqtSignal(float)
     pause_changed = pyqtSignal(bool)
     track_list_changed = pyqtSignal(list)
+    mouse_moved = pyqtSignal()
 
 class WebSocketThread(QThread):
     message_received = pyqtSignal(dict)
@@ -96,10 +156,15 @@ class SyncPlayClient(QMainWindow):
 
         self.video_container = QWidget()
         self.video_container.setStyleSheet("background-color: black;")
+        self.video_container.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
+        self.video_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         left_layout.addWidget(self.video_container, stretch=1)
         
-        # Player Controls Bar
-        control_layout = QHBoxLayout()
+        # Initialize OSC overlay
+        self.osc = ModernOscOverlay(self)
+        self.osc.show()
+
+        # Player Controls Bar (now in OSC)
         self.btn_play_pause = QPushButton("Play")
         self.btn_play_pause.setFixedWidth(60)
         self.lbl_time = QLabel("00:00 / 00:00")
@@ -124,28 +189,37 @@ class SyncPlayClient(QMainWindow):
         self.btn_fullscreen = QPushButton("⛶")
         self.btn_fullscreen.setFixedWidth(30)
         
-        # We need the control bar widget to be hideable
-        self.control_widget = QWidget()
-        self.control_widget.setLayout(control_layout)
-        left_layout.addWidget(self.control_widget)
+        self.osc.bg_layout.addWidget(self.btn_play_pause)
+        self.osc.bg_layout.addWidget(self.slider)
+        self.osc.bg_layout.addWidget(self.lbl_time)
+        self.osc.bg_layout.addWidget(self.volume_slider)
+        self.osc.bg_layout.addWidget(QLabel("Audio:"))
+        self.osc.bg_layout.addWidget(self.cb_audio)
+        self.osc.bg_layout.addWidget(QLabel("Subs:"))
+        self.osc.bg_layout.addWidget(self.cb_subtitles)
+        self.osc.bg_layout.addWidget(self.btn_toggle_sidebar)
+        self.osc.bg_layout.addWidget(self.btn_fullscreen)
         
-        control_layout.addWidget(self.btn_play_pause)
-        control_layout.addWidget(self.slider)
-        control_layout.addWidget(self.lbl_time)
-        control_layout.addWidget(self.volume_slider)
-        control_layout.addWidget(QLabel("Audio:"))
-        control_layout.addWidget(self.cb_audio)
-        control_layout.addWidget(QLabel("Subs:"))
-        control_layout.addWidget(self.cb_subtitles)
-        control_layout.addWidget(self.btn_toggle_sidebar)
-        control_layout.addWidget(self.btn_fullscreen)
+        # Install event filters to show/hide OSC
+        self.installEventFilter(self)
+        self.video_container.installEventFilter(self)
+        self.osc.installEventFilter(self)
+
+        # Timers for OSC
+        self.osc_timer = QTimer(self)
+        self.osc_timer.timeout.connect(self.update_osc_position)
+        self.osc_timer.start(50)
+
+        self.hide_osc_timer = QTimer(self)
+        self.hide_osc_timer.setSingleShot(True)
+        self.hide_osc_timer.timeout.connect(self.hide_osc)
         
         # Initialize MPV
         locale.setlocale(locale.LC_NUMERIC, 'C') # required by mpv
         self.player = mpv.MPV(wid=str(int(self.video_container.winId())),
                               input_default_bindings=True,
                               input_vo_keyboard=True,
-                              osc=True,
+                              osc=False,
                               cache="yes")
 
         # Right Panel (Controls & Playlist)
@@ -230,6 +304,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.duration_changed.connect(self.update_ui_duration)
         self.mpv_signals.pause_changed.connect(self.update_ui_pause)
         self.mpv_signals.track_list_changed.connect(self.update_ui_tracks)
+        self.mpv_signals.mouse_moved.connect(self.show_osc)
         self._current_duration = 0.0
 
         # Bind MPV events
@@ -237,10 +312,42 @@ class SyncPlayClient(QMainWindow):
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
         self.player.observe_property('duration', self.on_mpv_duration)
         self.player.observe_property('track-list', self.on_mpv_track_list)
+        self.player.observe_property('mouse-pos', self.on_mpv_mouse_pos)
         
         # Global Shortcuts
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
         self.shortcut_space.activated.connect(self.toggle_playback)
+
+    def update_osc_position(self):
+        if not self.osc.isVisible():
+            return
+        rect = self.video_container.rect()
+        global_pos = self.video_container.mapToGlobal(rect.topLeft())
+        w = rect.width()
+        # Set a fixed height or dynamic based on layout. 60 is a good default.
+        h = 60
+        margin = 20
+        self.osc.setGeometry(global_pos.x() + margin, global_pos.y() + rect.height() - h - margin, w - margin*2, h)
+
+    def show_osc(self):
+        self.osc.show()
+        self.update_osc_position()
+        self.hide_osc_timer.start(2000)
+
+    def hide_osc(self):
+        # Don't hide if a menu is open or slider is being dragged
+        if self.cb_audio.view().isVisible() or self.cb_subtitles.view().isVisible() or self.slider.isSliderDown():
+            self.hide_osc_timer.start(2000)
+            return
+        self.osc.hide()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseMove or event.type() == QEvent.Type.MouseButtonPress:
+            self.show_osc()
+        return super().eventFilter(obj, event)
+
+    def on_mpv_mouse_pos(self, _name, value):
+        self.mpv_signals.mouse_moved.emit()
 
     def update_cache_size(self, value_mb):
         bytes_val = value_mb * 1024 * 1024
@@ -258,11 +365,9 @@ class SyncPlayClient(QMainWindow):
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showNormal()
-            self.control_widget.setVisible(True)
             self.right_panel.setVisible(True)
         else:
             self.showFullScreen()
-            self.control_widget.setVisible(False)
             self.right_panel.setVisible(False)
 
     def change_volume(self, value):
