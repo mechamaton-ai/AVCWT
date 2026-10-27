@@ -652,7 +652,7 @@ class SyncPlayClient(QMainWindow):
                             'action': 'seek',
                             'position': value
                         })
-            elif self.is_host and (value - self._last_sync_time) > 1.0:
+            elif self.is_host and abs(value - self._last_sync_time) > 1.0:
                 self._last_sync_time = value
                 if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
                     self.ws_thread.send_message({
