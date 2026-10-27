@@ -166,8 +166,6 @@ class SyncPlayClient(QMainWindow):
         self.osc = ModernOscOverlay(self)
         self.osc.show()
 
-        from PyQt6.QtWidgets import QSizePolicy
-
         # Player Controls Bar (now in OSC)
         self.btn_play_pause = QPushButton("Play")
         self.btn_play_pause.setMaximumWidth(60)
