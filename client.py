@@ -273,7 +273,8 @@ class SyncPlayClient(QMainWindow):
                               input_default_bindings=True,
                               input_vo_keyboard=True,
                               osc=False,
-                              cache="yes")
+                              cache="yes",
+                              ytdl=True)
 
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
