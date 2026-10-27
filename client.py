@@ -700,7 +700,7 @@ class SyncPlayClient(QMainWindow):
         self.broadcast_playlist()
 
     def play_file(self, item):
-        self.player.pause = True
+        self.player.pause = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
         self.player.play(item.text())
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
