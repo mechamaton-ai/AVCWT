@@ -338,6 +338,8 @@ class SyncPlayClient(QMainWindow):
         self.ignore_next_seek = False
         self.ignore_next_pause = False
         
+        self.is_host = False
+
         # Control bar signals
         self.btn_play_pause.clicked.connect(self.toggle_playback)
         self.slider.sliderMoved.connect(self.seek_video)
@@ -538,6 +540,8 @@ class SyncPlayClient(QMainWindow):
         if connected:
             self.btn_connect.setText("Connected")
             self.btn_connect.setStyleSheet("background-color: green; color: white;")
+            if self.is_host:
+                self.broadcast_playlist()
         else:
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("Connect")
@@ -558,6 +562,19 @@ class SyncPlayClient(QMainWindow):
             position = data.get('position', 0)
             if self.player.time_pos is not None and abs(self.player.time_pos - position) > 1.0:
                 self.player.time_pos = position
+
+        elif action == 'playlist':
+            urls = data.get('urls', [])
+            current_url = None
+            if self.file_list.currentItem():
+                current_url = self.file_list.currentItem().text()
+
+            self.file_list.clear()
+            for url in urls:
+                item = QListWidgetItem(url)
+                self.file_list.addItem(item)
+                if url == current_url:
+                    self.file_list.setCurrentItem(item)
 
         elif action == 'play':
             url = data.get('url')
@@ -622,8 +639,17 @@ class SyncPlayClient(QMainWindow):
                     })
         self._last_time_pos = value
 
+    def broadcast_playlist(self):
+        if hasattr(self, 'ws_thread') and self.ws_thread:
+            urls = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+            self.ws_thread.send_message({
+                'action': 'playlist',
+                'urls': urls
+            })
+
     def host_server(self):
         if self.server_thread is None:
+            self.is_host = True
             self.server_thread = threading.Thread(target=run_server, daemon=True)
             self.server_thread.start()
             self.btn_host.setEnabled(False)
@@ -638,6 +664,7 @@ class SyncPlayClient(QMainWindow):
             item = QListWidgetItem(url)
             self.file_list.addItem(item)
             self.file_list.setCurrentItem(item)
+            self.broadcast_playlist()
             self.play_file(item)
 
     def remove_file(self):
@@ -647,14 +674,16 @@ class SyncPlayClient(QMainWindow):
         for item in selected:
             self.file_list.takeItem(self.file_list.row(item))
             self.player.command('stop')
+        self.broadcast_playlist()
 
     def play_file(self, item):
         self.player.pause = True
         self.player.play(item.text())
-        self.ws_thread.send_message({
-            'action': 'play',
-            'url': item.text()
-        })
+        if hasattr(self, 'ws_thread') and self.ws_thread:
+            self.ws_thread.send_message({
+                'action': 'play',
+                'url': item.text()
+            })
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
