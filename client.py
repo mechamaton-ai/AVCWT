@@ -562,6 +562,9 @@ class SyncPlayClient(QMainWindow):
         elif action == 'play':
             url = data.get('url')
             if url:
+                if not self.file_list.findItems(url, Qt.MatchFlag.MatchExactly):
+                    item = QListWidgetItem(url)
+                    self.file_list.addItem(item)
                 self.player.pause = True
                 self.player.play(url)
 

@@ -10,6 +10,7 @@ class SyncServer:
         self.clients = set()
         self.host = "0.0.0.0"
         self.port = 8765
+        self.current_url = None
 
     async def broadcast_user_count(self):
         if self.clients:
@@ -22,6 +23,12 @@ class SyncServer:
         self.clients.add(websocket)
         logging.info(f"Client connected. Total clients: {len(self.clients)}")
         await self.broadcast_user_count()
+
+        if self.current_url:
+            await websocket.send(json.dumps({
+                "action": "play",
+                "url": self.current_url
+            }))
 
     async def unregister(self, websocket):
         self.clients.remove(websocket)
@@ -43,6 +50,9 @@ class SyncServer:
             data = json.loads(message_str)
             logging.info(f"Received message: {data}")
             
+            if data.get("action") == "play":
+                self.current_url = data.get("url")
+
             # Simple broadcast to all other clients
             if self.clients:
                 tasks = []
