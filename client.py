@@ -164,30 +164,38 @@ class SyncPlayClient(QMainWindow):
         self.osc = ModernOscOverlay(self)
         self.osc.show()
 
+        from PyQt6.QtWidgets import QSizePolicy
+
         # Player Controls Bar (now in OSC)
         self.btn_play_pause = QPushButton("Play")
-        self.btn_play_pause.setFixedWidth(60)
+        self.btn_play_pause.setMaximumWidth(60)
         self.lbl_time = QLabel("00:00 / 00:00")
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 1000)
         self.slider.setEnabled(False)
+        self.slider.setMinimumWidth(30)
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(100)
-        self.volume_slider.setFixedWidth(100)
+        self.volume_slider.setMaximumWidth(100)
+        self.volume_slider.setMinimumWidth(30)
 
         self.cb_audio = QComboBox()
-        self.cb_audio.setFixedWidth(100)
+        self.cb_audio.setMaximumWidth(100)
+        self.cb_audio.setMinimumWidth(30)
+        self.cb_audio.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.cb_subtitles = QComboBox()
-        self.cb_subtitles.setFixedWidth(100)
+        self.cb_subtitles.setMaximumWidth(100)
+        self.cb_subtitles.setMinimumWidth(30)
+        self.cb_subtitles.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         
         self.btn_toggle_sidebar = QPushButton("☰")
-        self.btn_toggle_sidebar.setFixedWidth(30)
+        self.btn_toggle_sidebar.setMaximumWidth(30)
         
         self.btn_fullscreen = QPushButton("⛶")
-        self.btn_fullscreen.setFixedWidth(30)
+        self.btn_fullscreen.setMaximumWidth(30)
         
         self.osc.bg_layout.addWidget(self.btn_play_pause)
         self.osc.bg_layout.addWidget(self.slider)
@@ -327,17 +335,21 @@ class SyncPlayClient(QMainWindow):
         # Set a fixed height or dynamic based on layout. 60 is a good default.
         h = 60
         margin = 20
-        self.osc.setGeometry(global_pos.x() + margin, global_pos.y() + rect.height() - h - margin, w - margin*2, h)
+
+        # Ensure the OSC width does not exceed the video container width, and center if needed
+        osc_width = max(0, w - margin * 2)
+
+        self.osc.setGeometry(global_pos.x() + margin, global_pos.y() + rect.height() - h - margin, osc_width, h)
 
     def show_osc(self):
         self.osc.show()
         self.update_osc_position()
-        self.hide_osc_timer.start(2000)
+        self.hide_osc_timer.start(5000)
 
     def hide_osc(self):
         # Don't hide if a menu is open or slider is being dragged
         if self.cb_audio.view().isVisible() or self.cb_subtitles.view().isVisible() or self.slider.isSliderDown():
-            self.hide_osc_timer.start(2000)
+            self.hide_osc_timer.start(5000)
             return
         self.osc.hide()
 
