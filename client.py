@@ -174,10 +174,13 @@ class WebSocketThread(QThread):
             self.connection_status.emit(False)
 
     def send_message(self, data):
-        if self.ws and self._is_running and self.loop:
-            asyncio.run_coroutine_threadsafe(
-                self.ws.send(json.dumps(data)), self.loop
-            )
+        try:
+            if self.ws and self._is_running and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.ws.send(json.dumps(data)), self.loop
+                )
+        except Exception as e:
+            pass
 
     def stop(self):
         self._is_running = False
@@ -598,10 +601,11 @@ class SyncPlayClient(QMainWindow):
             return
         
         if value is not None:
-            self.ws_thread.send_message({
-                'action': 'pause',
-                'state': value
-            })
+            if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                self.ws_thread.send_message({
+                    'action': 'pause',
+                    'state': value
+                })
 
     def on_mpv_duration(self, _name, value):
         if value is not None:
@@ -633,14 +637,15 @@ class SyncPlayClient(QMainWindow):
                 if self.ignore_next_seek:
                     self.ignore_next_seek = False
                 else:
-                    self.ws_thread.send_message({
-                        'action': 'seek',
-                        'position': value
-                    })
+                    if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                        self.ws_thread.send_message({
+                            'action': 'seek',
+                            'position': value
+                        })
         self._last_time_pos = value
 
     def broadcast_playlist(self):
-        if hasattr(self, 'ws_thread') and self.ws_thread:
+        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             urls = [self.file_list.item(i).text() for i in range(self.file_list.count())]
             self.ws_thread.send_message({
                 'action': 'playlist',
@@ -679,7 +684,7 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self.player.pause = True
         self.player.play(item.text())
-        if hasattr(self, 'ws_thread') and self.ws_thread:
+        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
                 'action': 'play',
                 'url': item.text()
