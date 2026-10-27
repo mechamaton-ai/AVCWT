@@ -4,9 +4,10 @@ import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
-                             QComboBox, QSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
+                             QComboBox, QSpinBox, QStackedWidget)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint, QUrl
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
 os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
@@ -16,6 +17,7 @@ import threading
 import asyncio
 import websockets
 import json
+import re
 from server import run_server
 
 class ModernOscOverlay(QWidget):
@@ -201,13 +203,20 @@ class SyncPlayClient(QMainWindow):
         # Left Panel (Video Player Area & Controls)
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(left_panel, stretch=3)
+
+        self.player_stack = QStackedWidget()
+        left_layout.addWidget(self.player_stack, stretch=1)
 
         self.video_container = QWidget()
         self.video_container.setStyleSheet("background-color: black;")
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
-        left_layout.addWidget(self.video_container, stretch=1)
+        self.player_stack.addWidget(self.video_container)
+
+        self.web_view = QWebEngineView()
+        self.player_stack.addWidget(self.web_view)
         
         # Initialize OSC overlay
         self.osc = ModernOscOverlay(self)
@@ -453,8 +462,26 @@ class SyncPlayClient(QMainWindow):
         self.player.volume = value
 
     def toggle_playback(self):
-        if self.player.pause is not None:
-            self.player.pause = not self.player.pause
+        if self.player_stack.currentWidget() == self.web_view:
+            # We must use JS to toggle playback for web engine.
+            # Easiest way is to attempt to click a video tag or invoke play/pause on it.
+            js = """
+            var v = document.querySelector('video');
+            if(v) {
+                if(v.paused) v.play();
+                else v.pause();
+            }
+            """
+            self.web_view.page().runJavaScript(js)
+            # Send sync state proactively since we lack property observers for web
+            if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                self.ws_thread.send_message({
+                    'action': 'pause',
+                    'state': False # Simplified assuming it plays
+                })
+        else:
+            if self.player.pause is not None:
+                self.player.pause = not self.player.pause
 
     def seek_video(self, value):
         if self._current_duration > 0:
@@ -561,7 +588,12 @@ class SyncPlayClient(QMainWindow):
             
         elif action == 'pause':
             self.ignore_next_pause = True
-            self.player.pause = data.get('state', True)
+            if self.player_stack.currentWidget() == self.web_view:
+                state = data.get('state', True)
+                js = "var v = document.querySelector('video'); if(v) { " + ("v.pause();" if state else "v.play();") + " }"
+                self.web_view.page().runJavaScript(js)
+            else:
+                self.player.pause = data.get('state', True)
             
         elif action == 'seek':
             self.ignore_next_seek = True
@@ -596,8 +628,8 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(item)
                 else:
                     self.file_list.setCurrentItem(items[0])
-                self.player.pause = True
-                self.player.play(url)
+                # We need to call the updated play_file method to handle the routing
+                self.play_file(self.file_list.currentItem())
 
     def on_mpv_pause(self, _name, value):
         if value is not None:
@@ -700,12 +732,40 @@ class SyncPlayClient(QMainWindow):
         self.broadcast_playlist()
 
     def play_file(self, item):
-        self.player.pause = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
-        self.player.play(item.text())
+        url = item.text()
+
+        youtube_match = re.search(r'(?:v=|youtu\.be/)([^&?]+)', url)
+        twitch_match = re.search(r'twitch\.tv/([^/?&]+)', url)
+        kick_match = re.search(r'kick\.com/([^/?&]+)', url)
+
+        is_web = False
+        embed_url = None
+
+        if youtube_match:
+            is_web = True
+            embed_url = f"https://www.youtube.com/embed/{youtube_match.group(1)}?autoplay=1&enablejsapi=1"
+        elif twitch_match:
+            is_web = True
+            embed_url = f"https://player.twitch.tv/?channel={twitch_match.group(1)}&parent=localhost&autoplay=true"
+        elif kick_match:
+            is_web = True
+            # Kick's embed URL format
+            embed_url = f"https://player.kick.com/{kick_match.group(1)}?autoplay=true"
+
+        if is_web:
+            self.player.command('stop')
+            self.player_stack.setCurrentWidget(self.web_view)
+            self.web_view.setUrl(QUrl(embed_url))
+        else:
+            self.web_view.setUrl(QUrl("about:blank"))
+            self.player_stack.setCurrentWidget(self.video_container)
+            self.player.pause = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
+            self.player.play(url)
+
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
                 'action': 'play',
-                'url': item.text()
+                'url': url
             })
 
     def keyPressEvent(self, event):
