@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
                              QComboBox, QSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
@@ -77,6 +77,50 @@ class ModernOscOverlay(QWidget):
 
         self.bg_layout = QHBoxLayout(self.bg)
         self.bg_layout.setContentsMargins(10, 5, 10, 5)
+        self.layout.addWidget(self.bg)
+
+class VolumePopup(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(5, 5, 5, 5)
+
+        self.bg = QWidget()
+        self.bg.setStyleSheet("""
+            QWidget {
+                background-color: rgba(30, 30, 30, 200);
+                border-radius: 10px;
+            }
+            QSlider::groove:vertical {
+                border-radius: 2px;
+                width: 4px;
+                margin: 0px;
+                background-color: rgba(255, 255, 255, 50);
+            }
+            QSlider::handle:vertical {
+                background-color: white;
+                border: none;
+                height: 12px;
+                width: 12px;
+                margin: 0 -4px;
+                border-radius: 6px;
+            }
+            QSlider::add-page:vertical {
+                background-color: #2a82da;
+                border-radius: 2px;
+            }
+        """)
+        self.bg_layout = QVBoxLayout(self.bg)
+
+        self.slider = QSlider(Qt.Orientation.Vertical)
+        self.slider.setRange(0, 100)
+        self.slider.setValue(100)
+        self.slider.setMinimumHeight(100)
+        self.bg_layout.addWidget(self.slider)
+
         self.layout.addWidget(self.bg)
 
 class MpvSignals(QObject):
@@ -175,12 +219,6 @@ class SyncPlayClient(QMainWindow):
         self.slider.setRange(0, 1000)
         self.slider.setEnabled(False)
         self.slider.setMinimumWidth(30)
-        
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(100)
-        self.volume_slider.setMaximumWidth(100)
-        self.volume_slider.setMinimumWidth(30)
 
         self.cb_audio = QComboBox()
         self.cb_audio.setMaximumWidth(100)
@@ -188,6 +226,12 @@ class SyncPlayClient(QMainWindow):
         self.cb_subtitles = QComboBox()
         self.cb_subtitles.setMaximumWidth(100)
         self.cb_subtitles.setMinimumWidth(60)
+
+        # Volume popup and button
+        self.volume_popup = VolumePopup(self)
+        self.volume_slider = self.volume_popup.slider
+        self.btn_volume = QPushButton("🔊")
+        self.btn_volume.setMaximumWidth(30)
         
         self.btn_toggle_sidebar = QPushButton("☰")
         self.btn_toggle_sidebar.setMaximumWidth(30)
@@ -198,11 +242,11 @@ class SyncPlayClient(QMainWindow):
         self.osc.bg_layout.addWidget(self.btn_play_pause)
         self.osc.bg_layout.addWidget(self.slider)
         self.osc.bg_layout.addWidget(self.lbl_time)
-        self.osc.bg_layout.addWidget(self.volume_slider)
         self.osc.bg_layout.addWidget(QLabel("Audio:"))
         self.osc.bg_layout.addWidget(self.cb_audio)
         self.osc.bg_layout.addWidget(QLabel("Subs:"))
         self.osc.bg_layout.addWidget(self.cb_subtitles)
+        self.osc.bg_layout.addWidget(self.btn_volume)
         self.osc.bg_layout.addWidget(self.btn_toggle_sidebar)
         self.osc.bg_layout.addWidget(self.btn_fullscreen)
         
@@ -298,6 +342,7 @@ class SyncPlayClient(QMainWindow):
         self.btn_play_pause.clicked.connect(self.toggle_playback)
         self.slider.sliderMoved.connect(self.seek_video)
         self.volume_slider.valueChanged.connect(self.change_volume)
+        self.btn_volume.clicked.connect(self.toggle_volume_popup)
         self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
@@ -324,9 +369,21 @@ class SyncPlayClient(QMainWindow):
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
         self.shortcut_space.activated.connect(self.toggle_playback)
 
+    def toggle_volume_popup(self):
+        if self.volume_popup.isVisible():
+            self.volume_popup.hide()
+        else:
+            self.volume_popup.show()
+            # Position above the button
+            pos = self.btn_volume.mapToGlobal(QPoint(0, 0))
+            # Move up by height and center slightly
+            self.volume_popup.move(pos.x() + (self.btn_volume.width() - self.volume_popup.width()) // 2, pos.y() - self.volume_popup.height() - 5)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.update_osc_position()
+        if self.volume_popup.isVisible():
+            self.volume_popup.hide()
 
     def update_osc_position(self):
         if not self.osc.isVisible():
@@ -350,7 +407,7 @@ class SyncPlayClient(QMainWindow):
 
     def hide_osc(self):
         # Don't hide if a menu is open or slider is being dragged
-        if self.cb_audio.view().isVisible() or self.cb_subtitles.view().isVisible() or self.slider.isSliderDown():
+        if self.cb_audio.view().isVisible() or self.cb_subtitles.view().isVisible() or self.slider.isSliderDown() or self.volume_popup.isVisible() or self.volume_slider.isSliderDown():
             self.hide_osc_timer.start(5000)
             return
         self.osc.hide()
