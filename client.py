@@ -587,6 +587,9 @@ class SyncPlayClient(QMainWindow):
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("Connect")
             self.btn_connect.setStyleSheet("")
+            if self.player.pause != True:
+                self.ignore_next_pause = True
+                self.player.pause = True
 
     def handle_network_message(self, data):
         action = data.get('action')
