@@ -4,7 +4,7 @@ import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
-                             QComboBox, QSpinBox)
+                             QComboBox, QSpinBox, QAbstractItemView)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
@@ -282,6 +282,7 @@ class SyncPlayClient(QMainWindow):
 
         # --- Playlist / URL Management ---
         self.file_list = QListWidget()
+        self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         right_layout.addWidget(QLabel("Playlist"))
         right_layout.addWidget(self.file_list)
 
@@ -681,13 +682,23 @@ class SyncPlayClient(QMainWindow):
             QTimer.singleShot(1000, self.connect_to_server)
 
     def add_url(self):
-        url, ok = QInputDialog.getText(self, "Add URL", "Enter Media URL:")
-        if ok and url:
-            item = QListWidgetItem(url)
-            self.file_list.addItem(item)
-            self.file_list.setCurrentItem(item)
-            self.broadcast_playlist()
-            self.play_file(item)
+        text, ok = QInputDialog.getMultiLineText(self, "Add URLs", "Enter Media URLs (one per line):")
+        if ok and text:
+            urls = [line.strip() for line in text.split('\n') if line.strip()]
+            if not urls:
+                return
+
+            first_item = None
+            for url in urls:
+                item = QListWidgetItem(url)
+                self.file_list.addItem(item)
+                if first_item is None:
+                    first_item = item
+
+            if first_item:
+                self.file_list.setCurrentItem(first_item)
+                self.broadcast_playlist()
+                self.play_file(first_item)
 
     def remove_file(self):
         selected = self.file_list.selectedItems()
