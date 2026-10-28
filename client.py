@@ -654,19 +654,22 @@ class SyncPlayClient(QMainWindow):
                     'state': value
                 })
 
+    def apply_pending_pause(self):
+        if getattr(self, '_pending_pause', None) is not None:
+            self.ignore_next_pause = True
+            self.player.pause = self._pending_pause
+            self._pending_pause = None
+
     def on_mpv_duration(self, _name, value):
         if value is not None:
             self.mpv_signals.duration_changed.emit(value)
-            self._video_loading = False
 
-            if getattr(self, '_pending_seek', None) is not None:
-                self.player.time_pos = self._pending_seek
-                self._pending_seek = None
-
-            if getattr(self, '_pending_pause', None) is not None:
-                self.ignore_next_pause = True
-                self.player.pause = self._pending_pause
-                self._pending_pause = None
+            if getattr(self, '_video_loading', False):
+                self._video_loading = False
+                if getattr(self, '_pending_seek', None) is not None:
+                    self.player.time_pos = self._pending_seek
+                    self._pending_seek = None
+                QTimer.singleShot(300, self.apply_pending_pause)
 
     def on_mpv_track_list(self, _name, value):
         if value is not None:
@@ -681,10 +684,7 @@ class SyncPlayClient(QMainWindow):
                 if getattr(self, '_pending_seek', None) is not None:
                     self.player.time_pos = self._pending_seek
                     self._pending_seek = None
-                if getattr(self, '_pending_pause', None) is not None:
-                    self.ignore_next_pause = True
-                    self.player.pause = self._pending_pause
-                    self._pending_pause = None
+                QTimer.singleShot(300, self.apply_pending_pause)
 
         if self.ignore_next_seek:
             # We don't reset ignore_next_seek here immediately because time-pos
