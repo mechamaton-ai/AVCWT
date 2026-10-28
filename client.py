@@ -360,6 +360,7 @@ class SyncPlayClient(QMainWindow):
         self.ignore_next_pause = False
         self._pending_seek = None
         self._pending_pause = None
+        self._video_loading = False
         self._last_sync_time = 0.0
 
         self.is_host = False
@@ -595,7 +596,7 @@ class SyncPlayClient(QMainWindow):
             
         elif action == 'pause':
             state = data.get('state', True)
-            if self.player.time_pos is None:
+            if getattr(self, '_video_loading', False) or self.player.time_pos is None:
                 self._pending_pause = state
             else:
                 self.ignore_next_pause = True
@@ -606,9 +607,9 @@ class SyncPlayClient(QMainWindow):
             position = data.get('position', 0)
 
             # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
-            if self.player.time_pos is None:
+            if getattr(self, '_video_loading', False) or self.player.time_pos is None:
                 self._pending_seek = position
-            elif abs(self.player.time_pos - position) > 1.0:
+            elif abs((self.player.time_pos or 0) - position) > 1.0:
                 self.player.time_pos = position
 
         elif action == 'playlist':
@@ -634,6 +635,7 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(item)
                 else:
                     self.file_list.setCurrentItem(items[0])
+                self._video_loading = True
                 self.player.pause = True
                 self.player.play(url)
 
@@ -655,12 +657,13 @@ class SyncPlayClient(QMainWindow):
     def on_mpv_duration(self, _name, value):
         if value is not None:
             self.mpv_signals.duration_changed.emit(value)
+            self._video_loading = False
 
-            if self._pending_seek is not None:
+            if getattr(self, '_pending_seek', None) is not None:
                 self.player.time_pos = self._pending_seek
                 self._pending_seek = None
 
-            if hasattr(self, '_pending_pause') and self._pending_pause is not None:
+            if getattr(self, '_pending_pause', None) is not None:
                 self.ignore_next_pause = True
                 self.player.pause = self._pending_pause
                 self._pending_pause = None
@@ -673,6 +676,16 @@ class SyncPlayClient(QMainWindow):
         if value is not None:
             self.mpv_signals.time_pos_changed.emit(value)
             
+            if getattr(self, '_video_loading', False):
+                self._video_loading = False
+                if getattr(self, '_pending_seek', None) is not None:
+                    self.player.time_pos = self._pending_seek
+                    self._pending_seek = None
+                if getattr(self, '_pending_pause', None) is not None:
+                    self.ignore_next_pause = True
+                    self.player.pause = self._pending_pause
+                    self._pending_pause = None
+
         if self.ignore_next_seek:
             # We don't reset ignore_next_seek here immediately because time-pos
             # updates constantly. We'll let a small tolerance handle it, or 
@@ -776,10 +789,10 @@ class SyncPlayClient(QMainWindow):
             self.broadcast_playlist()
 
     def play_file(self, item):
-        is_connected = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
-        self.player.pause = is_connected
+        self._video_loading = True
+        self.player.pause = True
         self.player.play(item.text())
-        if is_connected:
+        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
                 'action': 'play',
                 'url': item.text()
