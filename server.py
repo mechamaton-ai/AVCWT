@@ -14,6 +14,7 @@ class SyncServer:
         self.playlist = []
         self.current_time = 0.0
         self.is_paused = True
+        self.client_times = {}
 
     async def broadcast_user_count(self):
         if self.clients:
@@ -49,6 +50,7 @@ class SyncServer:
 
     async def unregister(self, websocket):
         self.clients.remove(websocket)
+        self.client_times.pop(websocket, None)
         logging.info(f"Client disconnected. Total clients: {len(self.clients)}")
         await self.broadcast_user_count()
 
@@ -69,14 +71,27 @@ class SyncServer:
             
             if data.get("action") == "play":
                 self.current_url = data.get("url")
+                self.client_times.clear()
             elif data.get("action") == "playlist":
                 self.playlist = data.get("urls", [])
             elif data.get("action") == "pause":
                 self.is_paused = data.get("state", True)
             elif data.get("action") == "seek":
                 self.current_time = data.get("position", 0.0)
+                self.client_times.clear()
             elif data.get("action") == "time_sync":
                 self.current_time = data.get("position", 0.0)
+                self.client_times[sender_websocket] = self.current_time
+                if self.client_times:
+                    min_time = min(self.client_times.values())
+                    max_time = max(self.client_times.values())
+                    if max_time - min_time > 2.0:
+                        self.client_times.clear()
+                        seek_msg = json.dumps({"action": "seek", "position": min_time})
+                        if self.clients:
+                            tasks = [asyncio.create_task(client.send(seek_msg)) for client in self.clients]
+                            if tasks:
+                                await asyncio.wait(tasks)
                 return  # Do not broadcast time_sync to avoid stuttering clients
 
             # Simple broadcast to all other clients
