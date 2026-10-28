@@ -359,6 +359,7 @@ class SyncPlayClient(QMainWindow):
         self.ignore_next_seek = False
         self.ignore_next_pause = False
         self._pending_seek = None
+        self._pending_pause = None
         self._last_sync_time = 0.0
 
         self.is_host = False
@@ -593,8 +594,12 @@ class SyncPlayClient(QMainWindow):
             self.lbl_viewers.setText(f"Viewers: {data.get('count', 0)}")
             
         elif action == 'pause':
-            self.ignore_next_pause = True
-            self.player.pause = data.get('state', True)
+            state = data.get('state', True)
+            if self.player.time_pos is None:
+                self._pending_pause = state
+            else:
+                self.ignore_next_pause = True
+                self.player.pause = state
             
         elif action == 'seek':
             self.ignore_next_seek = True
@@ -654,6 +659,11 @@ class SyncPlayClient(QMainWindow):
             if self._pending_seek is not None:
                 self.player.time_pos = self._pending_seek
                 self._pending_seek = None
+
+            if hasattr(self, '_pending_pause') and self._pending_pause is not None:
+                self.ignore_next_pause = True
+                self.player.pause = self._pending_pause
+                self._pending_pause = None
 
     def on_mpv_track_list(self, _name, value):
         if value is not None:
