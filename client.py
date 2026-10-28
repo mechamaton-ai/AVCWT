@@ -4,7 +4,7 @@ import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
-                             QComboBox, QSpinBox)
+                             QComboBox, QSpinBox, QAbstractItemView, QDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
@@ -187,6 +187,31 @@ class WebSocketThread(QThread):
         if self.loop:
             self.loop.stop()
 
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.resize(300, 150)
+
+        layout = QVBoxLayout(self)
+
+        # Cache Setting
+        cache_layout = QHBoxLayout()
+        cache_layout.addWidget(QLabel("Network Cache (MB):"))
+        self.spin_cache = QSpinBox()
+        self.spin_cache.setRange(10, 2000)
+        # We'll set the initial value from the parent later
+        cache_layout.addWidget(self.spin_cache)
+        layout.addLayout(cache_layout)
+
+        layout.addSpacing(10)
+
+        # Host Server
+        self.btn_host = QPushButton("Host Server")
+        layout.addWidget(self.btn_host)
+
+        layout.addStretch()
+
 class SyncPlayClient(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -282,56 +307,49 @@ class SyncPlayClient(QMainWindow):
 
         # --- Playlist / URL Management ---
         self.file_list = QListWidget()
+        self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         right_layout.addWidget(QLabel("Playlist"))
         right_layout.addWidget(self.file_list)
 
         btn_layout = QHBoxLayout()
-        self.btn_add_url = QPushButton("Add URL")
-        self.btn_remove_file = QPushButton("Remove")
-        btn_layout.addWidget(self.btn_add_url)
-        btn_layout.addWidget(self.btn_remove_file)
+        self.btn_edit_playlist = QPushButton("Edit Playlist")
+        btn_layout.addWidget(self.btn_edit_playlist)
         right_layout.addLayout(btn_layout)
         
-        self.btn_add_url.clicked.connect(self.add_url)
-        self.btn_remove_file.clicked.connect(self.remove_file)
+        self.btn_edit_playlist.clicked.connect(self.edit_playlist)
         self.file_list.itemDoubleClicked.connect(self.play_file)
 
         # --- Settings & Network Controls ---
         right_layout.addSpacing(20)
         
-        # Cache Setting
-        cache_layout = QHBoxLayout()
-        cache_layout.addWidget(QLabel("Network Cache (MB):"))
-        self.spin_cache = QSpinBox()
-        self.spin_cache.setRange(10, 2000)
-        self.spin_cache.setValue(150) # Default to 150MB
-        cache_layout.addWidget(self.spin_cache)
-        right_layout.addLayout(cache_layout)
+        self.btn_settings = QPushButton("Settings")
+        right_layout.addWidget(self.btn_settings)
         
         right_layout.addSpacing(10)
         
-        # Network Connection
+        # Host Info
         net_header_layout = QHBoxLayout()
-        net_header_layout.addWidget(QLabel("Network Connection"))
+        net_header_layout.addWidget(QLabel("Host Info"))
         self.lbl_viewers = QLabel("Viewers: 0")
         self.lbl_viewers.setAlignment(Qt.AlignmentFlag.AlignRight)
         net_header_layout.addWidget(self.lbl_viewers)
         right_layout.addLayout(net_header_layout)
         
         self.ip_input = QLineEdit()
-        self.ip_input.setPlaceholderText("ws://localhost:8765")
-        self.ip_input.setText("ws://localhost:8765")
+        self.ip_input.setPlaceholderText("localhost:8765")
+        self.ip_input.setText("localhost:8765")
         right_layout.addWidget(self.ip_input)
 
         net_btn_layout = QHBoxLayout()
         self.btn_connect = QPushButton("Connect")
-        self.btn_host = QPushButton("Host Server")
         net_btn_layout.addWidget(self.btn_connect)
-        net_btn_layout.addWidget(self.btn_host)
         right_layout.addLayout(net_btn_layout)
         
-        self.btn_host.clicked.connect(self.host_server)
         self.btn_connect.clicked.connect(self.connect_to_server)
+        self.btn_settings.clicked.connect(self.open_settings)
+
+        # Internal state for settings
+        self.current_cache_size = 150
         
         self.server_thread = None
         self.ws_thread = WebSocketThread()
@@ -354,7 +372,6 @@ class SyncPlayClient(QMainWindow):
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
         self.cb_subtitles.currentIndexChanged.connect(self.change_subtitle_track)
-        self.spin_cache.valueChanged.connect(self.update_cache_size)
         
         # Mpv Thread Signals to GUI
         self.mpv_signals = MpvSignals()
@@ -428,6 +445,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.mouse_moved.emit()
 
     def update_cache_size(self, value_mb):
+        self.current_cache_size = value_mb
         bytes_val = value_mb * 1024 * 1024
         # Apply to player properties (python-mpv accesses these directly)
         try:
@@ -535,8 +553,10 @@ class SyncPlayClient(QMainWindow):
         self.cb_subtitles.blockSignals(False)
 
     def connect_to_server(self):
-        uri = self.ip_input.text()
+        uri = self.ip_input.text().strip()
         if uri:
+            if not uri.startswith("ws://") and not uri.startswith("wss://"):
+                uri = "ws://" + uri
             self.btn_connect.setEnabled(False)
             self.btn_connect.setText("Connecting...")
             self.ws_thread.connect_to(uri)
@@ -674,29 +694,62 @@ class SyncPlayClient(QMainWindow):
             self.is_host = True
             self.server_thread = threading.Thread(target=run_server, daemon=True)
             self.server_thread.start()
-            self.btn_host.setEnabled(False)
-            self.btn_host.setText("Hosting...")
-            self.ip_input.setText("ws://localhost:8765")
+            self.ip_input.setText("localhost:8765")
             # Wait 1s for the server to spin up and bind the port before connecting
             QTimer.singleShot(1000, self.connect_to_server)
 
-    def add_url(self):
-        url, ok = QInputDialog.getText(self, "Add URL", "Enter Media URL:")
-        if ok and url:
-            item = QListWidgetItem(url)
-            self.file_list.addItem(item)
-            self.file_list.setCurrentItem(item)
-            self.broadcast_playlist()
-            self.play_file(item)
+    def open_settings(self):
+        dialog = SettingsDialog(self)
+        dialog.spin_cache.setValue(self.current_cache_size)
 
-    def remove_file(self):
-        selected = self.file_list.selectedItems()
-        if not selected:
-            return
-        for item in selected:
-            self.file_list.takeItem(self.file_list.row(item))
-            self.player.command('stop')
-        self.broadcast_playlist()
+        # Disable button if already hosting
+        if self.server_thread is not None:
+            dialog.btn_host.setEnabled(False)
+            dialog.btn_host.setText("Hosting...")
+
+        dialog.spin_cache.valueChanged.connect(self.update_cache_size)
+
+        def on_host_clicked():
+            dialog.btn_host.setEnabled(False)
+            dialog.btn_host.setText("Hosting...")
+            self.host_server()
+
+        dialog.btn_host.clicked.connect(on_host_clicked)
+        dialog.exec()
+
+    def edit_playlist(self):
+        current_urls = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+        current_playing = self.file_list.currentItem().text() if self.file_list.currentItem() else None
+
+        text, ok = QInputDialog.getMultiLineText(self, "Edit Playlist", "Edit URLs (one per line):", '\n'.join(current_urls))
+        if ok:
+            new_urls = [line.strip() for line in text.split('\n') if line.strip()]
+
+            self.file_list.clear()
+
+            first_item = None
+            playing_item = None
+            for url in new_urls:
+                item = QListWidgetItem(url)
+                self.file_list.addItem(item)
+                if first_item is None:
+                    first_item = item
+                if url == current_playing:
+                    playing_item = item
+
+            if playing_item:
+                self.file_list.setCurrentItem(playing_item)
+            elif new_urls:
+                # If currently playing was removed, stop and optionally play first
+                if current_playing:
+                    self.player.command('stop')
+                if first_item:
+                    self.file_list.setCurrentItem(first_item)
+                    self.play_file(first_item)
+            else:
+                self.player.command('stop')
+
+            self.broadcast_playlist()
 
     def play_file(self, item):
         self.player.pause = True
