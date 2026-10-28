@@ -4,7 +4,7 @@ import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
-                             QComboBox, QSpinBox, QAbstractItemView)
+                             QComboBox, QSpinBox, QAbstractItemView, QDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
@@ -187,6 +187,31 @@ class WebSocketThread(QThread):
         if self.loop:
             self.loop.stop()
 
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.resize(300, 150)
+
+        layout = QVBoxLayout(self)
+
+        # Cache Setting
+        cache_layout = QHBoxLayout()
+        cache_layout.addWidget(QLabel("Network Cache (MB):"))
+        self.spin_cache = QSpinBox()
+        self.spin_cache.setRange(10, 2000)
+        # We'll set the initial value from the parent later
+        cache_layout.addWidget(self.spin_cache)
+        layout.addLayout(cache_layout)
+
+        layout.addSpacing(10)
+
+        # Host Server
+        self.btn_host = QPushButton("Host Server")
+        layout.addWidget(self.btn_host)
+
+        layout.addStretch()
+
 class SyncPlayClient(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -297,14 +322,8 @@ class SyncPlayClient(QMainWindow):
         # --- Settings & Network Controls ---
         right_layout.addSpacing(20)
         
-        # Cache Setting
-        cache_layout = QHBoxLayout()
-        cache_layout.addWidget(QLabel("Network Cache (MB):"))
-        self.spin_cache = QSpinBox()
-        self.spin_cache.setRange(10, 2000)
-        self.spin_cache.setValue(150) # Default to 150MB
-        cache_layout.addWidget(self.spin_cache)
-        right_layout.addLayout(cache_layout)
+        self.btn_settings = QPushButton("Settings")
+        right_layout.addWidget(self.btn_settings)
         
         right_layout.addSpacing(10)
         
@@ -323,13 +342,14 @@ class SyncPlayClient(QMainWindow):
 
         net_btn_layout = QHBoxLayout()
         self.btn_connect = QPushButton("Connect")
-        self.btn_host = QPushButton("Host Server")
         net_btn_layout.addWidget(self.btn_connect)
-        net_btn_layout.addWidget(self.btn_host)
         right_layout.addLayout(net_btn_layout)
         
-        self.btn_host.clicked.connect(self.host_server)
         self.btn_connect.clicked.connect(self.connect_to_server)
+        self.btn_settings.clicked.connect(self.open_settings)
+
+        # Internal state for settings
+        self.current_cache_size = 150
         
         self.server_thread = None
         self.ws_thread = WebSocketThread()
@@ -352,7 +372,6 @@ class SyncPlayClient(QMainWindow):
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         self.cb_audio.currentIndexChanged.connect(self.change_audio_track)
         self.cb_subtitles.currentIndexChanged.connect(self.change_subtitle_track)
-        self.spin_cache.valueChanged.connect(self.update_cache_size)
         
         # Mpv Thread Signals to GUI
         self.mpv_signals = MpvSignals()
@@ -426,6 +445,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.mouse_moved.emit()
 
     def update_cache_size(self, value_mb):
+        self.current_cache_size = value_mb
         bytes_val = value_mb * 1024 * 1024
         # Apply to player properties (python-mpv accesses these directly)
         try:
@@ -672,11 +692,28 @@ class SyncPlayClient(QMainWindow):
             self.is_host = True
             self.server_thread = threading.Thread(target=run_server, daemon=True)
             self.server_thread.start()
-            self.btn_host.setEnabled(False)
-            self.btn_host.setText("Hosting...")
             self.ip_input.setText("ws://localhost:8765")
             # Wait 1s for the server to spin up and bind the port before connecting
             QTimer.singleShot(1000, self.connect_to_server)
+
+    def open_settings(self):
+        dialog = SettingsDialog(self)
+        dialog.spin_cache.setValue(self.current_cache_size)
+
+        # Disable button if already hosting
+        if self.server_thread is not None:
+            dialog.btn_host.setEnabled(False)
+            dialog.btn_host.setText("Hosting...")
+
+        dialog.spin_cache.valueChanged.connect(self.update_cache_size)
+
+        def on_host_clicked():
+            dialog.btn_host.setEnabled(False)
+            dialog.btn_host.setText("Hosting...")
+            self.host_server()
+
+        dialog.btn_host.clicked.connect(on_host_clicked)
+        dialog.exec()
 
     def edit_playlist(self):
         current_urls = [self.file_list.item(i).text() for i in range(self.file_list.count())]
