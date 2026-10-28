@@ -827,8 +827,9 @@ class SyncPlayClient(QMainWindow):
             super().keyPressEvent(event)
 
 if __name__ == "__main__":
-    # Disable WebGPU and standard GPU acceleration to fix Error 153 / context provider issues
-    sys.argv.extend(["--disable-gpu", "--disable-software-rasterizer", "--disable-webgl"])
+    # Disable WebGPU, WebGL, and MediaFoundation video encode/decode via env var
+    # to fix Error 153 and context provider crashes on Windows WebEngine
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-software-rasterizer --disable-webgl --disable-accelerated-video-decode --disable-accelerated-video-encode"
     app = QApplication(sys.argv)
     
     # Enable Dark Mode
