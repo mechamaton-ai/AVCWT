@@ -336,8 +336,8 @@ class SyncPlayClient(QMainWindow):
         right_layout.addLayout(net_header_layout)
         
         self.ip_input = QLineEdit()
-        self.ip_input.setPlaceholderText("ws://localhost:8765")
-        self.ip_input.setText("ws://localhost:8765")
+        self.ip_input.setPlaceholderText("localhost:8765")
+        self.ip_input.setText("localhost:8765")
         right_layout.addWidget(self.ip_input)
 
         net_btn_layout = QHBoxLayout()
@@ -553,8 +553,10 @@ class SyncPlayClient(QMainWindow):
         self.cb_subtitles.blockSignals(False)
 
     def connect_to_server(self):
-        uri = self.ip_input.text()
+        uri = self.ip_input.text().strip()
         if uri:
+            if not uri.startswith("ws://") and not uri.startswith("wss://"):
+                uri = "ws://" + uri
             self.btn_connect.setEnabled(False)
             self.btn_connect.setText("Connecting...")
             self.ws_thread.connect_to(uri)
@@ -692,7 +694,7 @@ class SyncPlayClient(QMainWindow):
             self.is_host = True
             self.server_thread = threading.Thread(target=run_server, daemon=True)
             self.server_thread.start()
-            self.ip_input.setText("ws://localhost:8765")
+            self.ip_input.setText("localhost:8765")
             # Wait 1s for the server to spin up and bind the port before connecting
             QTimer.singleShot(1000, self.connect_to_server)
 
