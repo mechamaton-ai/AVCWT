@@ -287,14 +287,11 @@ class SyncPlayClient(QMainWindow):
         right_layout.addWidget(self.file_list)
 
         btn_layout = QHBoxLayout()
-        self.btn_add_url = QPushButton("Add URL")
-        self.btn_remove_file = QPushButton("Remove")
-        btn_layout.addWidget(self.btn_add_url)
-        btn_layout.addWidget(self.btn_remove_file)
+        self.btn_edit_playlist = QPushButton("Edit Playlist")
+        btn_layout.addWidget(self.btn_edit_playlist)
         right_layout.addLayout(btn_layout)
         
-        self.btn_add_url.clicked.connect(self.add_url)
-        self.btn_remove_file.clicked.connect(self.remove_file)
+        self.btn_edit_playlist.clicked.connect(self.edit_playlist)
         self.file_list.itemDoubleClicked.connect(self.play_file)
 
         # --- Settings & Network Controls ---
@@ -681,33 +678,39 @@ class SyncPlayClient(QMainWindow):
             # Wait 1s for the server to spin up and bind the port before connecting
             QTimer.singleShot(1000, self.connect_to_server)
 
-    def add_url(self):
-        text, ok = QInputDialog.getMultiLineText(self, "Add URLs", "Enter Media URLs (one per line):")
-        if ok and text:
-            urls = [line.strip() for line in text.split('\n') if line.strip()]
-            if not urls:
-                return
+    def edit_playlist(self):
+        current_urls = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+        current_playing = self.file_list.currentItem().text() if self.file_list.currentItem() else None
+
+        text, ok = QInputDialog.getMultiLineText(self, "Edit Playlist", "Edit URLs (one per line):", '\n'.join(current_urls))
+        if ok:
+            new_urls = [line.strip() for line in text.split('\n') if line.strip()]
+
+            self.file_list.clear()
 
             first_item = None
-            for url in urls:
+            playing_item = None
+            for url in new_urls:
                 item = QListWidgetItem(url)
                 self.file_list.addItem(item)
                 if first_item is None:
                     first_item = item
+                if url == current_playing:
+                    playing_item = item
 
-            if first_item:
-                self.file_list.setCurrentItem(first_item)
-                self.broadcast_playlist()
-                self.play_file(first_item)
+            if playing_item:
+                self.file_list.setCurrentItem(playing_item)
+            elif new_urls:
+                # If currently playing was removed, stop and optionally play first
+                if current_playing:
+                    self.player.command('stop')
+                if first_item:
+                    self.file_list.setCurrentItem(first_item)
+                    self.play_file(first_item)
+            else:
+                self.player.command('stop')
 
-    def remove_file(self):
-        selected = self.file_list.selectedItems()
-        if not selected:
-            return
-        for item in selected:
-            self.file_list.takeItem(self.file_list.row(item))
-            self.player.command('stop')
-        self.broadcast_playlist()
+            self.broadcast_playlist()
 
     def play_file(self, item):
         self.player.pause = True
