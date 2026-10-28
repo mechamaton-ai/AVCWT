@@ -54,6 +54,13 @@ class SyncServer:
         logging.info(f"Client disconnected. Total clients: {len(self.clients)}")
         await self.broadcast_user_count()
 
+        self.is_paused = True
+        if self.clients:
+            pause_msg = json.dumps({"action": "pause", "state": True})
+            tasks = [asyncio.create_task(client.send(pause_msg)) for client in self.clients]
+            if tasks:
+                await asyncio.wait(tasks)
+
     async def handler(self, websocket):
         await self.register(websocket)
         try:
