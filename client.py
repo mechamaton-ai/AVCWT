@@ -1,5 +1,11 @@
 import sys
 import os
+
+# Configure Chromium engine flags before any PyQt6 imports to fix Error 153 / WebGPU crashes
+# We disable GPU, GPU compositing, and WebGL, but we MUST allow software rasterizer
+# otherwise Chromium has no fallback and crashes with GLES3/shared context errors.
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-gpu-compositing --disable-webgl --disable-features=WebGPU,Vulkan --disable-accelerated-video-decode --disable-accelerated-video-encode"
+
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
@@ -827,9 +833,6 @@ class SyncPlayClient(QMainWindow):
             super().keyPressEvent(event)
 
 if __name__ == "__main__":
-    # Disable WebGPU, WebGL, and MediaFoundation video encode/decode via env var
-    # to fix Error 153 and context provider crashes on Windows WebEngine
-    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-software-rasterizer --disable-webgl --disable-accelerated-video-decode --disable-accelerated-video-encode"
     app = QApplication(sys.argv)
     
     # Enable Dark Mode
