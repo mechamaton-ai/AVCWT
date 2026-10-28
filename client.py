@@ -221,18 +221,22 @@ class SyncPlayClient(QMainWindow):
         # Main Widget and Layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
+        self.main_layout = QHBoxLayout(main_widget)
 
         # Left Panel (Video Player Area & Controls)
         left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        main_layout.addWidget(left_panel, stretch=3)
+        self.left_layout = QVBoxLayout(left_panel)
+        self.main_layout.addWidget(left_panel, stretch=3)
 
         self.video_container = QWidget()
         self.video_container.setStyleSheet("background-color: black;")
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
-        left_layout.addWidget(self.video_container, stretch=1)
+        self.left_layout.addWidget(self.video_container, stretch=1)
+
+        # Save default margins for fullscreen toggling
+        self._default_main_margins = self.main_layout.contentsMargins()
+        self._default_left_margins = self.left_layout.contentsMargins()
         
         # Initialize OSC overlay
         self.osc = ModernOscOverlay(self)
@@ -303,7 +307,7 @@ class SyncPlayClient(QMainWindow):
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
         right_layout = QVBoxLayout(self.right_panel)
-        main_layout.addWidget(self.right_panel, stretch=1)
+        self.main_layout.addWidget(self.right_panel, stretch=1)
 
         # --- Playlist / URL Management ---
         self.file_list = QListWidget()
@@ -464,9 +468,13 @@ class SyncPlayClient(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
             self.right_panel.setVisible(True)
+            self.main_layout.setContentsMargins(self._default_main_margins)
+            self.left_layout.setContentsMargins(self._default_left_margins)
         else:
             self.showFullScreen()
             self.right_panel.setVisible(False)
+            self.main_layout.setContentsMargins(0, 0, 0, 0)
+            self.left_layout.setContentsMargins(0, 0, 0, 0)
 
     def change_volume(self, value):
         self.player.volume = value
