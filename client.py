@@ -327,9 +327,9 @@ class SyncPlayClient(QMainWindow):
         
         right_layout.addSpacing(10)
         
-        # Network Connection
+        # Host Info
         net_header_layout = QHBoxLayout()
-        net_header_layout.addWidget(QLabel("Network Connection"))
+        net_header_layout.addWidget(QLabel("Host Info"))
         self.lbl_viewers = QLabel("Viewers: 0")
         self.lbl_viewers.setAlignment(Qt.AlignmentFlag.AlignRight)
         net_header_layout.addWidget(self.lbl_viewers)
