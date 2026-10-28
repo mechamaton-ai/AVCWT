@@ -237,6 +237,10 @@ class SyncPlayClient(QMainWindow):
         # Save default margins for fullscreen toggling
         self._default_main_margins = self.main_layout.contentsMargins()
         self._default_left_margins = self.left_layout.contentsMargins()
+
+        # Apply initial windowed mode margins
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(0, 0, self._default_main_margins.right(), 0)
         
         # Initialize OSC overlay
         self.osc = ModernOscOverlay(self)
@@ -463,14 +467,25 @@ class SyncPlayClient(QMainWindow):
 
     def toggle_sidebar(self):
         self.right_panel.setVisible(not self.right_panel.isVisible())
+        if not self.isFullScreen():
+            if self.right_panel.isVisible():
+                self.main_layout.setContentsMargins(0, 0, self._default_main_margins.right(), 0)
+            else:
+                self.main_layout.setContentsMargins(0, 0, 0, 0)
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showNormal()
-            self.right_panel.setVisible(True)
-            self.main_layout.setContentsMargins(self._default_main_margins)
-            self.left_layout.setContentsMargins(self._default_left_margins)
+            # Restore sidebar to its previous state
+            if getattr(self, '_sidebar_was_visible', True):
+                self.right_panel.setVisible(True)
+                self.main_layout.setContentsMargins(0, 0, self._default_main_margins.right(), 0)
+            else:
+                self.right_panel.setVisible(False)
+                self.main_layout.setContentsMargins(0, 0, 0, 0)
         else:
+            # Save the state before hiding
+            self._sidebar_was_visible = self.right_panel.isVisible()
             self.showFullScreen()
             self.right_panel.setVisible(False)
             self.main_layout.setContentsMargins(0, 0, 0, 0)
