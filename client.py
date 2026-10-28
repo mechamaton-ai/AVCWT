@@ -380,6 +380,12 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.mouse_moved.connect(self.show_osc)
         self._current_duration = 0.0
 
+
+        # Web View Synchronization Timer
+        self.web_sync_timer = QTimer(self)
+        self.web_sync_timer.timeout.connect(self.poll_web_player_state)
+        self.web_last_paused = None
+        self.web_last_duration = None
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
@@ -390,6 +396,44 @@ class SyncPlayClient(QMainWindow):
         # Global Shortcuts
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
         self.shortcut_space.activated.connect(self.toggle_playback)
+
+    def poll_web_player_state(self):
+        if self.player_stack.currentWidget() != self.web_view:
+            return
+
+        js_get_state = '''
+        (function() {
+            var v = document.querySelector('video');
+            if (v) {
+                return {
+                    currentTime: v.currentTime,
+                    duration: v.duration,
+                    paused: v.paused
+                };
+            }
+            return null;
+        })()
+        '''
+        self.web_view.page().runJavaScript(js_get_state, self._on_web_state_received)
+
+    def _on_web_state_received(self, state):
+        if not state:
+            return
+
+        current_time = state.get('currentTime', 0)
+        duration = state.get('duration', 0)
+        paused = state.get('paused', True)
+
+        if self.web_last_duration != duration and duration > 0:
+            self.web_last_duration = duration
+            self.on_mpv_duration("duration", duration)
+
+        if self.web_last_paused != paused:
+            self.web_last_paused = paused
+            self.on_mpv_pause("pause", paused)
+
+        # Simulate time-pos event
+        self.on_mpv_time_pos("time-pos", current_time)
 
     def toggle_volume_popup(self):
         if self.volume_popup.isVisible():
@@ -468,27 +512,10 @@ class SyncPlayClient(QMainWindow):
 
     def toggle_playback(self):
         if self.player_stack.currentWidget() == self.web_view:
-            # We must use JS to toggle playback for web engine and extract its new state.
-            js = """
-            (function() {
-                var v = document.querySelector('video');
-                if(v) {
-                    if(v.paused) { v.play(); return false; }
-                    else { v.pause(); return true; }
-                }
-                return false;
-            })();
-            """
-            def _handle_js_result(is_paused):
-                if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
-                    self.ws_thread.send_message({
-                        'action': 'pause',
-                        'state': is_paused
-                    })
-
-            self.web_view.page().runJavaScript(js, _handle_js_result)
+            js = "var v = document.querySelector('video'); if(v) { if(v.paused) v.play(); else v.pause(); }"
+            self.web_view.page().runJavaScript(js)
         else:
-            if self.player.pause is not None:
+            if hasattr(self, 'player') and hasattr(self.player, 'pause') and self.player.pause is not None:
                 self.player.pause = not self.player.pause
 
     def seek_video(self, value):
@@ -777,9 +804,13 @@ class SyncPlayClient(QMainWindow):
             self.player.command('stop')
             self.player_stack.setCurrentWidget(self.web_view)
             self.web_view.setUrl(QUrl(embed_url))
+            self.web_sync_timer.start(500)
+            self.web_last_paused = None
+            self.web_last_duration = None
         else:
             self.web_view.setUrl(QUrl("about:blank"))
             self.player_stack.setCurrentWidget(self.video_container)
+            self.web_sync_timer.stop()
             self.player.pause = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
             self.player.play(url)
 
