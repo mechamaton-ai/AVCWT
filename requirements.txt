@@ -2,4 +2,3 @@ PyQt6
 python-mpv
 websockets
 yt-dlp
-PyQt6-WebEngine

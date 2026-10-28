@@ -1,20 +1,12 @@
 import sys
 import os
-
-# Configure Chromium engine flags before any PyQt6 imports to fix Error 153 / WebGPU crashes
-# We disable GPU, GPU compositing, and WebGL, but we MUST allow software rasterizer
-# otherwise Chromium has no fallback and crashes with GLES3/shared context errors.
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-gpu-compositing --disable-webgl --disable-features=WebGPU,Vulkan --disable-accelerated-video-decode --disable-accelerated-video-encode"
-
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
-                             QComboBox, QSpinBox, QStackedWidget)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint, QUrl
+                             QComboBox, QSpinBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEngineProfile
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
 os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
@@ -24,7 +16,6 @@ import threading
 import asyncio
 import websockets
 import json
-import re
 from server import run_server
 
 class ModernOscOverlay(QWidget):
@@ -210,24 +201,13 @@ class SyncPlayClient(QMainWindow):
         # Left Panel (Video Player Area & Controls)
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(left_panel, stretch=3)
-
-        self.player_stack = QStackedWidget()
-        left_layout.addWidget(self.player_stack, stretch=1)
 
         self.video_container = QWidget()
         self.video_container.setStyleSheet("background-color: black;")
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
-        self.player_stack.addWidget(self.video_container)
-
-        self.web_view = QWebEngineView()
-        # Set a standard user agent to avoid being blocked by YouTube (Error 153)
-        profile = self.web_view.page().profile()
-        profile.setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-        self.player_stack.addWidget(self.web_view)
+        left_layout.addWidget(self.video_container, stretch=1)
         
         # Initialize OSC overlay
         self.osc = ModernOscOverlay(self)
@@ -293,8 +273,7 @@ class SyncPlayClient(QMainWindow):
                               input_default_bindings=True,
                               input_vo_keyboard=True,
                               osc=False,
-                              cache="yes",
-                              ytdl=True)
+                              cache="yes", ytdl=True)
 
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
@@ -386,12 +365,6 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.mouse_moved.connect(self.show_osc)
         self._current_duration = 0.0
 
-
-        # Web View Synchronization Timer
-        self.web_sync_timer = QTimer(self)
-        self.web_sync_timer.timeout.connect(self.poll_web_player_state)
-        self.web_last_paused = None
-        self.web_last_duration = None
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
@@ -402,44 +375,6 @@ class SyncPlayClient(QMainWindow):
         # Global Shortcuts
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
         self.shortcut_space.activated.connect(self.toggle_playback)
-
-    def poll_web_player_state(self):
-        if self.player_stack.currentWidget() != self.web_view:
-            return
-
-        js_get_state = '''
-        (function() {
-            var v = document.querySelector('video');
-            if (v) {
-                return {
-                    currentTime: v.currentTime,
-                    duration: v.duration,
-                    paused: v.paused
-                };
-            }
-            return null;
-        })()
-        '''
-        self.web_view.page().runJavaScript(js_get_state, self._on_web_state_received)
-
-    def _on_web_state_received(self, state):
-        if not state:
-            return
-
-        current_time = state.get('currentTime', 0)
-        duration = state.get('duration', 0)
-        paused = state.get('paused', True)
-
-        if self.web_last_duration != duration and duration > 0:
-            self.web_last_duration = duration
-            self.on_mpv_duration("duration", duration)
-
-        if self.web_last_paused != paused:
-            self.web_last_paused = paused
-            self.on_mpv_pause("pause", paused)
-
-        # Simulate time-pos event
-        self.on_mpv_time_pos("time-pos", current_time)
 
     def toggle_volume_popup(self):
         if self.volume_popup.isVisible():
@@ -517,26 +452,13 @@ class SyncPlayClient(QMainWindow):
         self.player.volume = value
 
     def toggle_playback(self):
-        if self.player_stack.currentWidget() == self.web_view:
-            js = "var v = document.querySelector('video'); if(v) { if(v.paused) v.play(); else v.pause(); }"
-            self.web_view.page().runJavaScript(js)
-        else:
-            if hasattr(self, 'player') and hasattr(self.player, 'pause') and self.player.pause is not None:
-                self.player.pause = not self.player.pause
+        if self.player.pause is not None:
+            self.player.pause = not self.player.pause
 
     def seek_video(self, value):
         if self._current_duration > 0:
             new_pos = (value / 1000.0) * self._current_duration
-            if self.player_stack.currentWidget() == self.web_view:
-                js = f"var v = document.querySelector('video'); if(v) {{ v.currentTime = {new_pos}; }}"
-                self.web_view.page().runJavaScript(js)
-                if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
-                    self.ws_thread.send_message({
-                        'action': 'seek',
-                        'position': new_pos
-                    })
-            else:
-                self.player.time_pos = new_pos
+            self.player.time_pos = new_pos
 
     def format_time(self, seconds):
         if seconds is None:
@@ -638,26 +560,17 @@ class SyncPlayClient(QMainWindow):
             
         elif action == 'pause':
             self.ignore_next_pause = True
-            if self.player_stack.currentWidget() == self.web_view:
-                state = data.get('state', True)
-                js = "var v = document.querySelector('video'); if(v) { " + ("v.pause();" if state else "v.play();") + " }"
-                self.web_view.page().runJavaScript(js)
-            else:
-                self.player.pause = data.get('state', True)
+            self.player.pause = data.get('state', True)
             
         elif action == 'seek':
             self.ignore_next_seek = True
             position = data.get('position', 0)
 
-            if self.player_stack.currentWidget() == self.web_view:
-                js = f"var v = document.querySelector('video'); if(v) {{ v.currentTime = {position}; }}"
-                self.web_view.page().runJavaScript(js)
-            else:
-                # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
-                if self.player.time_pos is None:
-                    self._pending_seek = position
-                elif abs(self.player.time_pos - position) > 1.0:
-                    self.player.time_pos = position
+            # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
+            if self.player.time_pos is None:
+                self._pending_seek = position
+            elif abs(self.player.time_pos - position) > 1.0:
+                self.player.time_pos = position
 
         elif action == 'playlist':
             urls = data.get('urls', [])
@@ -682,8 +595,8 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(item)
                 else:
                     self.file_list.setCurrentItem(items[0])
-                # We need to call the updated play_file method to handle the routing
-                self.play_file(self.file_list.currentItem())
+                self.player.pause = True
+                self.player.play(url)
 
     def on_mpv_pause(self, _name, value):
         if value is not None:
@@ -786,44 +699,12 @@ class SyncPlayClient(QMainWindow):
         self.broadcast_playlist()
 
     def play_file(self, item):
-        url = item.text()
-
-        youtube_match = re.search(r'(?:v=|youtu\.be/)([^&?]+)', url)
-        twitch_match = re.search(r'twitch\.tv/([^/?&]+)', url)
-        kick_match = re.search(r'kick\.com/([^/?&]+)', url)
-
-        is_web = False
-        embed_url = None
-
-        if youtube_match:
-            is_web = True
-            embed_url = f"https://www.youtube.com/embed/{youtube_match.group(1)}?autoplay=1&enablejsapi=1"
-        elif twitch_match:
-            is_web = True
-            embed_url = f"https://player.twitch.tv/?channel={twitch_match.group(1)}&parent=localhost&autoplay=true"
-        elif kick_match:
-            is_web = True
-            # Kick's embed URL format
-            embed_url = f"https://player.kick.com/{kick_match.group(1)}?autoplay=true"
-
-        if is_web:
-            self.player.command('stop')
-            self.player_stack.setCurrentWidget(self.web_view)
-            self.web_view.setUrl(QUrl(embed_url))
-            self.web_sync_timer.start(500)
-            self.web_last_paused = None
-            self.web_last_duration = None
-        else:
-            self.web_view.setUrl(QUrl("about:blank"))
-            self.player_stack.setCurrentWidget(self.video_container)
-            self.web_sync_timer.stop()
-            self.player.pause = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
-            self.player.play(url)
-
+        self.player.pause = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
+        self.player.play(item.text())
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
                 'action': 'play',
-                'url': url
+                'url': item.text()
             })
 
     def keyPressEvent(self, event):
