@@ -567,6 +567,20 @@ class SyncPlayClient(QMainWindow):
             self.btn_connect.setStyleSheet("background-color: green; color: white;")
             if self.is_host:
                 self.broadcast_playlist()
+                if self.file_list.currentItem():
+                    self.ws_thread.send_message({
+                        'action': 'play',
+                        'url': self.file_list.currentItem().text()
+                    })
+                    if self.player.time_pos is not None:
+                        self.ws_thread.send_message({
+                            'action': 'seek',
+                            'position': self.player.time_pos
+                        })
+                    self.ws_thread.send_message({
+                        'action': 'pause',
+                        'state': getattr(self.player, 'pause', True)
+                    })
         else:
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("Connect")
@@ -752,9 +766,10 @@ class SyncPlayClient(QMainWindow):
             self.broadcast_playlist()
 
     def play_file(self, item):
-        self.player.pause = True
+        is_connected = hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False)
+        self.player.pause = is_connected
         self.player.play(item.text())
-        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+        if is_connected:
             self.ws_thread.send_message({
                 'action': 'play',
                 'url': item.text()
