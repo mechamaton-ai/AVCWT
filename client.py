@@ -595,8 +595,8 @@ class SyncPlayClient(QMainWindow):
             self.lbl_viewers.setText(f"Viewers: {data.get('count', 0)}")
             
         elif action == 'pause':
-            state = data.get('state', True)
-            if getattr(self, '_video_loading', False) or self.player.time_pos is None:
+            state = bool(data.get('state', True))
+            if getattr(self, '_video_loading', False):
                 self._pending_pause = state
             else:
                 self.ignore_next_pause = True
@@ -606,8 +606,8 @@ class SyncPlayClient(QMainWindow):
             self.ignore_next_seek = True
             position = data.get('position', 0)
 
-            # If the video isn't fully loaded (duration <= 0 or time_pos is None), queue the seek
-            if getattr(self, '_video_loading', False) or self.player.time_pos is None:
+            # If the video isn't fully loaded, queue the seek
+            if getattr(self, '_video_loading', False):
                 self._pending_seek = position
             elif abs((self.player.time_pos or 0) - position) > 1.0:
                 self.player.time_pos = position
