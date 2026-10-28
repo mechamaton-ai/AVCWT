@@ -221,18 +221,26 @@ class SyncPlayClient(QMainWindow):
         # Main Widget and Layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
+        self.main_layout = QHBoxLayout(main_widget)
 
         # Left Panel (Video Player Area & Controls)
         left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        main_layout.addWidget(left_panel, stretch=3)
+        self.left_layout = QVBoxLayout(left_panel)
+        self.main_layout.addWidget(left_panel, stretch=3)
 
         self.video_container = QWidget()
         self.video_container.setStyleSheet("background-color: black;")
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
         self.video_container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
-        left_layout.addWidget(self.video_container, stretch=1)
+        self.left_layout.addWidget(self.video_container, stretch=1)
+
+        # Save default margins for fullscreen toggling
+        self._default_main_margins = self.main_layout.contentsMargins()
+        self._default_left_margins = self.left_layout.contentsMargins()
+
+        # Apply initial windowed mode margins
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(0, 0, self._default_main_margins.right(), 0)
         
         # Initialize OSC overlay
         self.osc = ModernOscOverlay(self)
@@ -303,7 +311,7 @@ class SyncPlayClient(QMainWindow):
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
         right_layout = QVBoxLayout(self.right_panel)
-        main_layout.addWidget(self.right_panel, stretch=1)
+        self.main_layout.addWidget(self.right_panel, stretch=1)
 
         # --- Playlist / URL Management ---
         self.file_list = QListWidget()
@@ -459,14 +467,29 @@ class SyncPlayClient(QMainWindow):
 
     def toggle_sidebar(self):
         self.right_panel.setVisible(not self.right_panel.isVisible())
+        if not self.isFullScreen():
+            if self.right_panel.isVisible():
+                self.main_layout.setContentsMargins(0, 0, self._default_main_margins.right(), 0)
+            else:
+                self.main_layout.setContentsMargins(0, 0, 0, 0)
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showNormal()
-            self.right_panel.setVisible(True)
+            # Restore sidebar to its previous state
+            if getattr(self, '_sidebar_was_visible', True):
+                self.right_panel.setVisible(True)
+                self.main_layout.setContentsMargins(0, 0, self._default_main_margins.right(), 0)
+            else:
+                self.right_panel.setVisible(False)
+                self.main_layout.setContentsMargins(0, 0, 0, 0)
         else:
+            # Save the state before hiding
+            self._sidebar_was_visible = self.right_panel.isVisible()
             self.showFullScreen()
             self.right_panel.setVisible(False)
+            self.main_layout.setContentsMargins(0, 0, 0, 0)
+            self.left_layout.setContentsMargins(0, 0, 0, 0)
 
     def change_volume(self, value):
         self.player.volume = value
