@@ -85,7 +85,7 @@ class SyncServer:
                 if self.client_times:
                     min_time = min(self.client_times.values())
                     max_time = max(self.client_times.values())
-                    if max_time - min_time > 4.0:
+                    if max_time - min_time > 2.0:
                         self.client_times.clear()
                         seek_msg = json.dumps({"action": "seek", "position": min_time})
                         if self.clients:
