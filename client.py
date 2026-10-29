@@ -73,6 +73,9 @@ class ModernOscOverlay(QWidget):
                 border-radius: 4px;
                 padding: 2px 10px 2px 5px;
             }
+            #play_pause_btn, #btn_skip_back, #btn_skip_forward, #btn_volume, #btn_fullscreen, #btn_toggle_sidebar {
+                font-size: 24px;
+            }
         """)
 
         self.bg_layout = QHBoxLayout(self.bg)
@@ -247,9 +250,20 @@ class SyncPlayClient(QMainWindow):
         self.osc.show()
 
         # Player Controls Bar (now in OSC)
-        self.btn_play_pause = QPushButton("Play")
+        self.btn_play_pause = QPushButton("▶")
+        self.btn_play_pause.setObjectName("play_pause_btn")
         self.btn_play_pause.setMaximumWidth(60)
-        self.lbl_time = QLabel("00:00 / 00:00")
+
+        self.btn_skip_back = QPushButton("⏮")
+        self.btn_skip_back.setObjectName("btn_skip_back")
+        self.btn_skip_back.setMaximumWidth(30)
+
+        self.btn_skip_forward = QPushButton("⏭")
+        self.btn_skip_forward.setObjectName("btn_skip_forward")
+        self.btn_skip_forward.setMaximumWidth(30)
+
+        self.lbl_time = QLabel("00:00:00")
+        self.lbl_duration = QLabel("-00:00:00")
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 1000)
@@ -267,24 +281,30 @@ class SyncPlayClient(QMainWindow):
         self.volume_popup = VolumePopup(self)
         self.volume_slider = self.volume_popup.slider
         self.btn_volume = QPushButton("🔊")
+        self.btn_volume.setObjectName("btn_volume")
         self.btn_volume.setMaximumWidth(30)
         
         self.btn_toggle_sidebar = QPushButton("☰")
+        self.btn_toggle_sidebar.setObjectName("btn_toggle_sidebar")
         self.btn_toggle_sidebar.setMaximumWidth(30)
         
         self.btn_fullscreen = QPushButton("⛶")
+        self.btn_fullscreen.setObjectName("btn_fullscreen")
         self.btn_fullscreen.setMaximumWidth(30)
         
         self.osc.bg_layout.addWidget(self.btn_play_pause)
-        self.osc.bg_layout.addWidget(self.slider)
+        self.osc.bg_layout.addWidget(self.btn_skip_back)
+        self.osc.bg_layout.addWidget(self.btn_skip_forward)
         self.osc.bg_layout.addWidget(self.lbl_time)
-        self.osc.bg_layout.addWidget(QLabel("Audio:"))
-        self.osc.bg_layout.addWidget(self.cb_audio)
-        self.osc.bg_layout.addWidget(QLabel("Subs:"))
+        self.osc.bg_layout.addWidget(self.slider)
+        self.osc.bg_layout.addWidget(self.lbl_duration)
+        self.osc.bg_layout.addWidget(QLabel("💬"))
         self.osc.bg_layout.addWidget(self.cb_subtitles)
+        self.osc.bg_layout.addWidget(QLabel("🎵"))
+        self.osc.bg_layout.addWidget(self.cb_audio)
         self.osc.bg_layout.addWidget(self.btn_volume)
-        self.osc.bg_layout.addWidget(self.btn_toggle_sidebar)
         self.osc.bg_layout.addWidget(self.btn_fullscreen)
+        self.osc.bg_layout.addWidget(self.btn_toggle_sidebar)
         
         # Install event filters to show/hide OSC
         self.installEventFilter(self)
@@ -378,6 +398,9 @@ class SyncPlayClient(QMainWindow):
 
         # Control bar signals
         self.btn_play_pause.clicked.connect(self.toggle_playback)
+        self.btn_skip_forward.clicked.connect(self.skip_forward)
+        self.btn_skip_backward = self.btn_skip_back # Aliasing just to be safe
+        self.btn_skip_back.clicked.connect(self.skip_backward)
         self.slider.sliderMoved.connect(self.seek_video)
         self.volume_slider.valueChanged.connect(self.change_volume)
         self.btn_volume.clicked.connect(self.toggle_volume_popup)
@@ -501,6 +524,14 @@ class SyncPlayClient(QMainWindow):
         if self.player.pause is not None:
             self.player.pause = not self.player.pause
 
+    def skip_forward(self):
+        if self.player.time_pos is not None:
+            self.player.time_pos = min(self.player.time_pos + 10, self._current_duration)
+
+    def skip_backward(self):
+        if self.player.time_pos is not None:
+            self.player.time_pos = max(self.player.time_pos - 10, 0)
+
     def seek_video(self, value):
         if self._current_duration > 0:
             new_pos = (value / 1000.0) * self._current_duration
@@ -508,19 +539,19 @@ class SyncPlayClient(QMainWindow):
 
     def format_time(self, seconds):
         if seconds is None:
-            return "00:00"
-        m, s = divmod(int(seconds), 60)
+            return "00:00:00"
+        m, s = divmod(int(abs(seconds)), 60)
         h, m = divmod(m, 60)
-        if h > 0:
-            return f"{h:02d}:{m:02d}:{s:02d}"
-        return f"{m:02d}:{s:02d}"
+        sign = "-" if seconds < 0 else ""
+        return f"{sign}{h:02d}:{m:02d}:{s:02d}"
 
     def update_ui_time(self, time_pos):
         if self._current_duration > 0:
             self.slider.blockSignals(True)
             self.slider.setValue(int((time_pos / self._current_duration) * 1000))
             self.slider.blockSignals(False)
-        self.lbl_time.setText(f"{self.format_time(time_pos)} / {self.format_time(self._current_duration)}")
+        self.lbl_time.setText(self.format_time(time_pos))
+        self.lbl_duration.setText(self.format_time(time_pos - self._current_duration))
 
     def update_ui_duration(self, duration):
         self._current_duration = duration
@@ -528,9 +559,10 @@ class SyncPlayClient(QMainWindow):
             self.slider.setEnabled(True)
         else:
             self.slider.setEnabled(False)
+        self.lbl_duration.setText(self.format_time(-self._current_duration))
 
     def update_ui_pause(self, is_paused):
-        self.btn_play_pause.setText("Play" if is_paused else "Pause")
+        self.btn_play_pause.setText("▶" if is_paused else "⏸")
 
     def change_audio_track(self, index):
         track_id = self.cb_audio.itemData(index)
