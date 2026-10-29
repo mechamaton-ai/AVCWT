@@ -248,7 +248,7 @@ class SyncPlayClient(QMainWindow):
         self.osc.show()
 
         # Player Controls Bar (now in OSC)
-        self.btn_play_pause = QPushButton("Play")
+        self.btn_play_pause = QPushButton("▶")
         self.btn_play_pause.setMaximumWidth(60)
         self.lbl_time = QLabel("00:00 / 00:00")
         
@@ -529,7 +529,7 @@ class SyncPlayClient(QMainWindow):
             self.slider.setEnabled(False)
 
     def update_ui_pause(self, is_paused):
-        self.btn_play_pause.setText("Play" if is_paused else "Pause")
+        self.btn_play_pause.setText("▶" if is_paused else "⏸")
 
     def change_audio_track(self, index):
         track_id = self.cb_audio.itemData(index)
