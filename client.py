@@ -73,6 +73,9 @@ class ModernOscOverlay(QWidget):
                 border-radius: 4px;
                 padding: 2px 10px 2px 5px;
             }
+            #play_pause_btn {
+                font-size: 24px;
+            }
         """)
 
         self.bg_layout = QHBoxLayout(self.bg)
@@ -249,7 +252,8 @@ class SyncPlayClient(QMainWindow):
 
         # Player Controls Bar (now in OSC)
         self.btn_play_pause = QPushButton("▶")
-        self.btn_play_pause.setMaximumWidth(60)
+        self.btn_play_pause.setObjectName('play_pause_btn')
+        self.btn_play_pause.setMaximumWidth(80)
         self.lbl_time = QLabel("00:00 / 00:00")
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
