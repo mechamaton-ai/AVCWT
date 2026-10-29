@@ -1,0 +1,1 @@
+pyinstaller --noconfirm --windowed client.py

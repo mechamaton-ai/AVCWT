@@ -24,3 +24,6 @@ To start the application:
 pip install -r requirements.txt
 python client.py
 ```
+
+## Building Standalone Executables
+To create a standalone executable that doesn't require Python, run `build.bat` on Windows or `./build.sh` on Linux/macOS.
