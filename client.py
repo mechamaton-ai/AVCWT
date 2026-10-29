@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
                              QComboBox, QSpinBox, QAbstractItemView, QDialog)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint, QSettings
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
@@ -215,6 +215,7 @@ class SettingsDialog(QDialog):
 class SyncPlayClient(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.settings = QSettings("AVCWT", "SyncPlayClient")
         self.setWindowTitle("AVCWT")
         self.resize(800, 600)
 
@@ -345,7 +346,8 @@ class SyncPlayClient(QMainWindow):
         
         self.ip_input = QLineEdit()
         self.ip_input.setPlaceholderText("localhost:8765")
-        self.ip_input.setText("localhost:8765")
+        saved_host = self.settings.value("host_address", "localhost:8765")
+        self.ip_input.setText(saved_host)
         right_layout.addWidget(self.ip_input)
 
         net_btn_layout = QHBoxLayout()
@@ -830,6 +832,10 @@ class SyncPlayClient(QMainWindow):
             self.toggle_fullscreen()
         else:
             super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        self.settings.setValue("host_address", self.ip_input.text().strip())
+        super().closeEvent(event)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
