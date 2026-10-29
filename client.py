@@ -133,6 +133,7 @@ class MpvSignals(QObject):
     pause_changed = pyqtSignal(bool)
     track_list_changed = pyqtSignal(list)
     mouse_moved = pyqtSignal()
+    eof_reached = pyqtSignal()
 
 class WebSocketThread(QThread):
     message_received = pyqtSignal(dict)
@@ -313,6 +314,16 @@ class SyncPlayClient(QMainWindow):
                               cache="yes",
                               ytdl=True)
 
+        @self.player.event_callback('end_file')
+        def on_end_file(event):
+            if hasattr(event, 'event'):
+                data = event.event
+                if getattr(data, 'reason', None) == mpv.MpvEventEndFile.EOF:
+                    self.mpv_signals.eof_reached.emit()
+            elif hasattr(event, 'as_dict'):
+                if event.as_dict().get('reason') == b'eof' or event.as_dict().get('reason') == 'eof':
+                    self.mpv_signals.eof_reached.emit()
+
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()
         right_layout = QVBoxLayout(self.right_panel)
@@ -398,6 +409,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.pause_changed.connect(self.update_ui_pause)
         self.mpv_signals.track_list_changed.connect(self.update_ui_tracks)
         self.mpv_signals.mouse_moved.connect(self.show_osc)
+        self.mpv_signals.eof_reached.connect(self.play_next_item)
         self._current_duration = 0.0
 
         # Bind MPV events
@@ -822,6 +834,15 @@ class SyncPlayClient(QMainWindow):
                 self.player.command('stop')
 
             self.broadcast_playlist()
+
+    def play_next_item(self):
+        current_item = self.file_list.currentItem()
+        if current_item:
+            current_row = self.file_list.row(current_item)
+            if current_row < self.file_list.count() - 1:
+                next_item = self.file_list.item(current_row + 1)
+                self.file_list.setCurrentItem(next_item)
+                self.play_file(next_item)
 
     def play_file(self, item):
         self._video_loading = True
