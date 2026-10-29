@@ -360,7 +360,7 @@ class SyncPlayClient(QMainWindow):
         self.btn_settings.clicked.connect(self.open_settings)
 
         # Internal state for settings
-        self.current_cache_size = 150
+        self.current_cache_size = self.settings.value("cache_size", 150, type=int)
         
         self.server_thread = None
         self.ws_thread = WebSocketThread()
@@ -836,6 +836,7 @@ class SyncPlayClient(QMainWindow):
 
     def closeEvent(self, event):
         self.settings.setValue("host_address", self.ip_input.text())
+        self.settings.setValue("cache_size", self.current_cache_size)
         super().closeEvent(event)
 
 if __name__ == "__main__":
