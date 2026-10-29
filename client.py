@@ -343,7 +343,7 @@ class SyncPlayClient(QMainWindow):
         net_header_layout.addWidget(self.lbl_viewers)
         right_layout.addLayout(net_header_layout)
         
-        self.settings = QSettings("AVCWT", "SyncPlayClient")
+        self.settings = QSettings("settings.ini", QSettings.Format.IniFormat)
         saved_host = self.settings.value("host_address", "localhost:8765")
 
         self.ip_input = QLineEdit()
