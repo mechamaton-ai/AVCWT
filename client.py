@@ -546,6 +546,9 @@ class SyncPlayClient(QMainWindow):
         else:
             self.slider.setEnabled(False)
 
+        current_time = self.player.time_pos if hasattr(self, 'player') and self.player.time_pos is not None else 0.0
+        self.lbl_time.setText(f"{self.format_time(current_time)} / {self.format_time(self._current_duration)}")
+
     def update_ui_pause(self, is_paused):
         self.btn_play_pause.setText("Play" if is_paused else "Pause")
 
