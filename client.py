@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
                              QLabel, QLineEdit, QInputDialog, QSlider, QListWidgetItem,
                              QComboBox, QSpinBox, QAbstractItemView, QDialog)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoint, QSettings
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
@@ -343,9 +343,12 @@ class SyncPlayClient(QMainWindow):
         net_header_layout.addWidget(self.lbl_viewers)
         right_layout.addLayout(net_header_layout)
         
+        self.settings = QSettings("settings.ini", QSettings.Format.IniFormat)
+        saved_host = self.settings.value("host_address", "localhost:8765")
+
         self.ip_input = QLineEdit()
         self.ip_input.setPlaceholderText("localhost:8765")
-        self.ip_input.setText("localhost:8765")
+        self.ip_input.setText(saved_host)
         right_layout.addWidget(self.ip_input)
 
         net_btn_layout = QHBoxLayout()
@@ -357,7 +360,7 @@ class SyncPlayClient(QMainWindow):
         self.btn_settings.clicked.connect(self.open_settings)
 
         # Internal state for settings
-        self.current_cache_size = 150
+        self.current_cache_size = self.settings.value("cache_size", 150, type=int)
         
         self.server_thread = None
         self.ws_thread = WebSocketThread()
@@ -830,6 +833,11 @@ class SyncPlayClient(QMainWindow):
             self.toggle_fullscreen()
         else:
             super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        self.settings.setValue("host_address", self.ip_input.text())
+        self.settings.setValue("cache_size", self.current_cache_size)
+        super().closeEvent(event)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
