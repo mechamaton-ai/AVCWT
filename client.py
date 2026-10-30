@@ -14,12 +14,12 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoin
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
-os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
+os.environ["PATH"] = os.environ["PATH"] + os.pathsep + os.path.dirname(os.path.abspath(__file__))
 # Also add the python environment bin/Scripts directory to PATH so mpv can find yt-dlp
 env_bin_dir = os.path.join(sys.exec_prefix, 'Scripts' if os.name == 'nt' else 'bin')
-os.environ["PATH"] = env_bin_dir + os.pathsep + os.environ["PATH"]
+os.environ["PATH"] = os.environ["PATH"] + os.pathsep + env_bin_dir
 if sys.platform.startswith("linux"):
-    os.environ["PATH"] = os.path.expanduser("~/.local/bin") + os.pathsep + os.environ["PATH"]
+    os.environ["PATH"] = os.environ["PATH"] + os.pathsep + os.path.expanduser("~/.local/bin")
 
 import mpv
 
