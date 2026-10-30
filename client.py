@@ -18,6 +18,8 @@ os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + o
 # Also add the python environment bin/Scripts directory to PATH so mpv can find yt-dlp
 env_bin_dir = os.path.join(sys.exec_prefix, 'Scripts' if os.name == 'nt' else 'bin')
 os.environ["PATH"] = env_bin_dir + os.pathsep + os.environ["PATH"]
+if sys.platform.startswith("linux"):
+    os.environ["PATH"] = os.path.expanduser("~/.local/bin") + os.pathsep + os.environ["PATH"]
 
 import mpv
 
@@ -317,7 +319,8 @@ class SyncPlayClient(QMainWindow):
                               input_vo_keyboard=True,
                               osc=False,
                               cache="yes",
-                              ytdl=True)
+                              ytdl=True,
+                              script_opts="ytdl_hook-ytdl_path=yt-dlp")
 
         @self.player.event_callback('end_file')
         def on_end_file(event):
