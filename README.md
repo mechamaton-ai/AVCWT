@@ -16,6 +16,7 @@ A Python-based desktop application for synchronizing media playback across multi
 * websockets
 * `libmpv` library installed on the system:
   * **Linux (Debian/Ubuntu):** `sudo apt install libmpv-dev`
+  * **Linux (Arch/CachyOS/Manjaro):** `sudo pacman -S mpv`
   * **Windows:** Download the latest `mpv-dev` library from [here](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/) (e.g., `mpv-dev-x86_64-....7z`). Extract the archive and copy the `mpv-2.dll` (or `mpv-1.dll`) file directly into the same folder as `client.py`.
 
 ## Running
