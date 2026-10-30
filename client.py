@@ -320,6 +320,8 @@ class SyncPlayClient(QMainWindow):
                               osc=False,
                               cache="yes",
                               ytdl=True,
+                              hwdec="auto",
+                              ytdl_format="bestvideo[height<=?1080]+bestaudio/best",
                               script_opts="ytdl_hook-ytdl_path=yt-dlp")
 
         @self.player.event_callback('end_file')
