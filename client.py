@@ -625,14 +625,13 @@ class SyncPlayClient(QMainWindow):
                         'action': 'play',
                         'url': self.file_list.currentItem().text()
                     })
-                    if self.player.time_pos is not None:
-                        self.ws_thread.send_message({
-                            'action': 'seek',
-                            'position': self.player.time_pos
-                        })
+                    self.ws_thread.send_message({
+                        'action': 'seek',
+                        'position': self.player.time_pos or 0.0
+                    })
                     self.ws_thread.send_message({
                         'action': 'pause',
-                        'state': getattr(self.player, 'pause', True)
+                        'state': bool(getattr(self.player, 'pause', True))
                     })
         else:
             self.btn_connect.setEnabled(True)
@@ -662,6 +661,9 @@ class SyncPlayClient(QMainWindow):
             # If the video isn't fully loaded, queue the seek
             if getattr(self, '_video_loading', False):
                 self._pending_seek = position
+            # Ignore incoming seek actions if this is a live stream (duration <= 0)
+            elif getattr(self, '_current_duration', 0.0) <= 0:
+                return
             elif abs((self.player.time_pos or 0) - position) > 1.0:
                 self.ignore_next_seek = True
                 self.player.time_pos = position
@@ -722,7 +724,8 @@ class SyncPlayClient(QMainWindow):
             if getattr(self, '_video_loading', False):
                 self._video_loading = False
                 if getattr(self, '_pending_seek', None) is not None:
-                    self.player.time_pos = self._pending_seek
+                    if getattr(self, '_current_duration', 0.0) > 0:
+                        self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
 
@@ -737,7 +740,8 @@ class SyncPlayClient(QMainWindow):
             if getattr(self, '_video_loading', False):
                 self._video_loading = False
                 if getattr(self, '_pending_seek', None) is not None:
-                    self.player.time_pos = self._pending_seek
+                    if getattr(self, '_current_duration', 0.0) > 0:
+                        self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
 
@@ -760,17 +764,19 @@ class SyncPlayClient(QMainWindow):
                     self.ignore_next_seek = False
                 else:
                     if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
-                        self.ws_thread.send_message({
-                            'action': 'seek',
-                            'position': value
-                        })
+                        if getattr(self, '_current_duration', 0.0) > 0:
+                            self.ws_thread.send_message({
+                                'action': 'seek',
+                                'position': value
+                            })
             elif abs(value - self._last_sync_time) > 1.5:
                 self._last_sync_time = value
                 if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
-                    self.ws_thread.send_message({
-                        'action': 'time_sync',
-                        'position': value
-                    })
+                    if getattr(self, '_current_duration', 0.0) > 0:
+                        self.ws_thread.send_message({
+                            'action': 'time_sync',
+                            'position': value
+                        })
         self._last_time_pos = value
 
     def broadcast_playlist(self):
