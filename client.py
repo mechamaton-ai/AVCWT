@@ -861,6 +861,7 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self._video_loading = True
         self.player.pause = True
+        self._pending_pause = False
         self.player.play(item.text())
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
