@@ -697,6 +697,8 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(items[0])
                 self._video_loading = True
                 self.player.pause = True
+                self._pending_pause = False
+                self.player.command('stop')
                 self.player.play(url)
 
     def on_mpv_pause(self, _name, value):
