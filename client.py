@@ -3,6 +3,7 @@ import os
 
 if sys.platform.startswith("linux"):
     os.environ["QT_QPA_PLATFORM"] = "xcb"
+    os.environ.pop("WAYLAND_DISPLAY", None)
 
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
