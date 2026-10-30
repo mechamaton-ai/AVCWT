@@ -1,5 +1,9 @@
 import sys
 import os
+
+if sys.platform.startswith("linux"):
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
+
 import locale
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QListWidget, QFileDialog, 
@@ -869,8 +873,6 @@ class SyncPlayClient(QMainWindow):
         super().closeEvent(event)
 
 if __name__ == "__main__":
-    if sys.platform.startswith("linux"):
-        os.environ["QT_QPA_PLATFORM"] = "xcb"
     app = QApplication(sys.argv)
     
     # Enable Dark Mode
