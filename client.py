@@ -14,12 +14,17 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoin
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
-os.environ["PATH"] = os.environ["PATH"] + os.pathsep + os.path.dirname(os.path.abspath(__file__))
+os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
+
 # Also add the python environment bin/Scripts directory to PATH so mpv can find yt-dlp
 env_bin_dir = os.path.join(sys.exec_prefix, 'Scripts' if os.name == 'nt' else 'bin')
-os.environ["PATH"] = os.environ["PATH"] + os.pathsep + env_bin_dir
 if sys.platform.startswith("linux"):
+    # On Linux (like Arch/CachyOS), we append to avoid shadowing the up-to-date system yt-dlp
+    os.environ["PATH"] = os.environ["PATH"] + os.pathsep + env_bin_dir
     os.environ["PATH"] = os.environ["PATH"] + os.pathsep + os.path.expanduser("~/.local/bin")
+else:
+    # On Windows, we prepend to ensure local binaries are preferred
+    os.environ["PATH"] = env_bin_dir + os.pathsep + os.environ["PATH"]
 
 import mpv
 
@@ -322,7 +327,7 @@ class SyncPlayClient(QMainWindow):
                               ytdl=True,
                               hwdec="auto",
                               ytdl_format="bestvideo[height<=?1080]+bestaudio/best",
-                              script_opts="ytdl_hook-ytdl_path=yt-dlp")
+                              script_opts="ytdl_hook-ytdl_path=yt-dlp,ytdl_hook-ytdl_raw_options=extractor-args=youtube:player_client=android")
 
         @self.player.event_callback('end_file')
         def on_end_file(event):
@@ -689,6 +694,7 @@ class SyncPlayClient(QMainWindow):
         elif action == 'play':
             url = data.get('url')
             if url:
+                url = url.strip()
                 items = self.file_list.findItems(url, Qt.MatchFlag.MatchExactly)
                 if not items:
                     item = QListWidgetItem(url)
@@ -866,11 +872,12 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self._video_loading = True
         self.player.pause = True
-        self.player.play(item.text())
+        url = item.text().strip()
+        self.player.play(url)
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
                 'action': 'play',
-                'url': item.text()
+                'url': url
             })
 
     def keyPressEvent(self, event):
