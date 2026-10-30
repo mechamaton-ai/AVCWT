@@ -14,10 +14,12 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QEvent, QPoin
 from PyQt6.QtGui import QPalette, QColor, QKeySequence, QShortcut
 
 # Add the script directory to the PATH to find mpv-*.dll on Windows
-os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ["PATH"]
+os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + os.path.dirname(os.path.abspath(__file__))
 # Also add the python environment bin/Scripts directory to PATH so mpv can find yt-dlp
 env_bin_dir = os.path.join(sys.exec_prefix, 'Scripts' if os.name == 'nt' else 'bin')
-os.environ["PATH"] = env_bin_dir + os.pathsep + os.environ["PATH"]
+os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + env_bin_dir
+if sys.platform.startswith("linux"):
+    os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + os.path.expanduser("~/.local/bin")
 
 import mpv
 
@@ -317,7 +319,11 @@ class SyncPlayClient(QMainWindow):
                               input_vo_keyboard=True,
                               osc=False,
                               cache="yes",
-                              ytdl=True)
+                              ytdl=True,
+                              script_opts="ytdl_hook-ytdl_path=yt-dlp",
+                              ytdl_raw_options="extractor-args=youtube:player_client=android",
+                              hwdec="auto",
+                              ytdl_format="bestvideo[height<=?1080]+bestaudio/best")
 
         @self.player.event_callback('end_file')
         def on_end_file(event):
