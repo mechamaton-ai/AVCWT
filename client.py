@@ -869,6 +869,10 @@ class SyncPlayClient(QMainWindow):
         super().closeEvent(event)
 
 if __name__ == "__main__":
+    # Force X11 backend (xcb) on Linux/Wayland since Wayland does not support --wid embedding
+    if sys.platform.startswith('linux') and not os.environ.get("QT_QPA_PLATFORM"):
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+
     app = QApplication(sys.argv)
     
     # Enable Dark Mode
