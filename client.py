@@ -657,7 +657,8 @@ class SyncPlayClient(QMainWindow):
         elif action == 'pause':
             state = bool(data.get('state', True))
             if getattr(self, '_video_loading', False):
-                self._pending_pause = state
+                if getattr(self, '_pending_pause', None) is not False or state is False:
+                    self._pending_pause = state
             elif self.player.pause != state:
                 self.ignore_next_pause = True
                 self.player.pause = state
@@ -697,6 +698,8 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(items[0])
                 self._video_loading = True
                 self.player.pause = True
+                self._pending_pause = False
+                self.player.command('stop')
                 self.player.play(url)
 
     def on_mpv_pause(self, _name, value):
@@ -861,6 +864,8 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self._video_loading = True
         self.player.pause = True
+        self._pending_pause = False
+        self.player.command('stop')
         self.player.play(item.text())
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
