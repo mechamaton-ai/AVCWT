@@ -657,7 +657,8 @@ class SyncPlayClient(QMainWindow):
         elif action == 'pause':
             state = bool(data.get('state', True))
             if getattr(self, '_video_loading', False):
-                self._pending_pause = state
+                if getattr(self, '_pending_pause', None) is not False or state is False:
+                    self._pending_pause = state
             elif self.player.pause != state:
                 self.ignore_next_pause = True
                 self.player.pause = state
