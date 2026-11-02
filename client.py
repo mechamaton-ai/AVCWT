@@ -429,6 +429,7 @@ class SyncPlayClient(QMainWindow):
         self.player.observe_property('duration', self.on_mpv_duration)
         self.player.observe_property('track-list', self.on_mpv_track_list)
         self.player.observe_property('mouse-pos', self.on_mpv_mouse_pos)
+        self.player.observe_property('paused-for-cache', self.on_mpv_paused_for_cache)
         
         # Global Shortcuts
         self.shortcut_space = QShortcut(QKeySequence("Space"), self)
@@ -701,6 +702,20 @@ class SyncPlayClient(QMainWindow):
                 self._pending_pause = False
                 self.player.command('stop')
                 self.player.play(url)
+
+    def on_mpv_paused_for_cache(self, _name, value):
+        if value is not None:
+            if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                if value:
+                    self.ws_thread.send_message({
+                        'action': 'pause',
+                        'state': True
+                    })
+                else:
+                    self.ws_thread.send_message({
+                        'action': 'pause',
+                        'state': bool(self.player.pause)
+                    })
 
     def on_mpv_pause(self, _name, value):
         if value is not None:
