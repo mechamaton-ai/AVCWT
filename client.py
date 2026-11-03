@@ -664,6 +664,9 @@ class SyncPlayClient(QMainWindow):
                 self.player.pause = state
             
         elif action == 'seek':
+            if (getattr(self.player, 'duration', None) or 0.0) <= 0:
+                return
+
             position = data.get('position', 0)
 
             # If the video isn't fully loaded, queue the seek
@@ -730,7 +733,7 @@ class SyncPlayClient(QMainWindow):
 
             if getattr(self, '_video_loading', False):
                 self._video_loading = False
-                if getattr(self, '_pending_seek', None) is not None:
+                if getattr(self, '_pending_seek', None) is not None and (getattr(self.player, 'duration', None) or 0.0) > 0:
                     self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
@@ -745,7 +748,7 @@ class SyncPlayClient(QMainWindow):
             
             if getattr(self, '_video_loading', False):
                 self._video_loading = False
-                if getattr(self, '_pending_seek', None) is not None:
+                if getattr(self, '_pending_seek', None) is not None and (getattr(self.player, 'duration', None) or 0.0) > 0:
                     self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
@@ -763,23 +766,24 @@ class SyncPlayClient(QMainWindow):
             self._last_time_pos = value
             
         if value is not None and self._last_time_pos is not None:
-            # If difference is more than 1.5 seconds, consider it a seek
-            if abs(value - self._last_time_pos) > 1.5:
-                if self.ignore_next_seek:
-                    self.ignore_next_seek = False
-                else:
+            if (getattr(self.player, 'duration', None) or 0.0) > 0:
+                # If difference is more than 1.5 seconds, consider it a seek
+                if abs(value - self._last_time_pos) > 1.5:
+                    if self.ignore_next_seek:
+                        self.ignore_next_seek = False
+                    else:
+                        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+                            self.ws_thread.send_message({
+                                'action': 'seek',
+                                'position': value
+                            })
+                elif abs(value - self._last_sync_time) > 1.5:
+                    self._last_sync_time = value
                     if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
                         self.ws_thread.send_message({
-                            'action': 'seek',
+                            'action': 'time_sync',
                             'position': value
                         })
-            elif abs(value - self._last_sync_time) > 1.5:
-                self._last_sync_time = value
-                if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
-                    self.ws_thread.send_message({
-                        'action': 'time_sync',
-                        'position': value
-                    })
         self._last_time_pos = value
 
     def broadcast_playlist(self):
