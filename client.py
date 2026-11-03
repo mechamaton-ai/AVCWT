@@ -331,9 +331,15 @@ class SyncPlayClient(QMainWindow):
                 data = event.event
                 if getattr(data, 'reason', None) == mpv.MpvEventEndFile.EOF:
                     self.mpv_signals.eof_reached.emit()
+                elif getattr(data, 'reason', None) == mpv.MpvEventEndFile.ERROR:
+                    if hasattr(self, 'play_next_item'):
+                        self.mpv_signals.eof_reached.emit()
             elif hasattr(event, 'as_dict'):
                 if event.as_dict().get('reason') == b'eof' or event.as_dict().get('reason') == 'eof':
                     self.mpv_signals.eof_reached.emit()
+                elif event.as_dict().get('reason') == b'error' or event.as_dict().get('reason') == 'error':
+                    if hasattr(self, 'play_next_item'):
+                        self.mpv_signals.eof_reached.emit()
 
         # Right Panel (Controls & Playlist)
         self.right_panel = QWidget()

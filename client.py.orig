@@ -630,7 +630,8 @@ class SyncPlayClient(QMainWindow):
                 if self.file_list.currentItem():
                     self.ws_thread.send_message({
                         'action': 'play',
-                        'url': self.file_list.currentItem().text()
+                        'url': self.file_list.currentItem().text(),
+                        'pause_state': getattr(self.player, 'pause', True)
                     })
                     if self.player.time_pos is not None:
                         self.ws_thread.send_message({
@@ -699,7 +700,7 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(items[0])
                 self._video_loading = True
                 self.player.pause = True
-                self._pending_pause = False
+                self._pending_pause = data.get('pause_state', False)
                 self.player.command('stop')
                 self.player.play(url)
 
@@ -885,7 +886,8 @@ class SyncPlayClient(QMainWindow):
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
                 'action': 'play',
-                'url': item.text()
+                'url': item.text(),
+                'pause_state': False
             })
 
     def keyPressEvent(self, event):
