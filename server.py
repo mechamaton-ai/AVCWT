@@ -37,7 +37,8 @@ class SyncServer:
         if self.current_url:
             await websocket.send(json.dumps({
                 "action": "play",
-                "url": self.current_url
+                "url": self.current_url,
+                "pause_state": self.is_paused
             }))
             await websocket.send(json.dumps({
                 "action": "seek",

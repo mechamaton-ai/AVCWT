@@ -1,0 +1,20 @@
+--- client.py
++++ client.py
+@@ -628,7 +628,8 @@
+                 if self.file_list.currentItem():
+                     self.ws_thread.send_message({
+                         'action': 'play',
+-                        'url': self.file_list.currentItem().text()
++                        'url': self.file_list.currentItem().text(),
++                        'pause_state': getattr(self.player, 'pause', True)
+                     })
+                     if self.player.time_pos is not None:
+                         self.ws_thread.send_message({
+@@ -699,7 +700,7 @@
+                     self.file_list.setCurrentItem(items[0])
+                 self._video_loading = True
+                 self.player.pause = True
+-                self._pending_pause = False
++                self._pending_pause = data.get('pause_state', False)
+                 self.player.command('stop')
+                 self.player.play(url)
