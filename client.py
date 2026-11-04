@@ -27,6 +27,7 @@ import threading
 import asyncio
 import websockets
 import json
+import yt_dlp
 from server import run_server
 
 class ModernOscOverlay(QWidget):
@@ -400,6 +401,7 @@ class SyncPlayClient(QMainWindow):
         self._pending_pause = None
         self._video_loading = False
         self._last_sync_time = 0.0
+        self._is_live = False
 
         self.is_host = False
 
@@ -669,7 +671,7 @@ class SyncPlayClient(QMainWindow):
             # If the video isn't fully loaded, queue the seek
             if getattr(self, '_video_loading', False):
                 self._pending_seek = position
-            elif (getattr(self.player, 'duration', None) or 0.0) > 0:
+            elif not getattr(self, '_is_live', False):
                 if abs((self.player.time_pos or 0) - position) > 1.0:
                     self.ignore_next_seek = True
                     self.player.time_pos = position
@@ -698,10 +700,12 @@ class SyncPlayClient(QMainWindow):
                 else:
                     self.file_list.setCurrentItem(items[0])
                 self._video_loading = True
+                self._is_live = False
                 self.player.pause = True
                 self._pending_pause = False
                 self.player.command('stop')
                 self.player.play(url)
+                self._check_is_live(url)
 
     def on_mpv_pause(self, _name, value):
         if value is not None:
@@ -732,7 +736,7 @@ class SyncPlayClient(QMainWindow):
             if getattr(self, '_video_loading', False):
                 self._video_loading = False
                 if getattr(self, '_pending_seek', None) is not None:
-                    if (getattr(self.player, 'duration', None) or 0.0) > 0:
+                    if not getattr(self, '_is_live', False):
                         self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
@@ -748,7 +752,7 @@ class SyncPlayClient(QMainWindow):
             if getattr(self, '_video_loading', False):
                 self._video_loading = False
                 if getattr(self, '_pending_seek', None) is not None:
-                    if (getattr(self.player, 'duration', None) or 0.0) > 0:
+                    if not getattr(self, '_is_live', False):
                         self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
@@ -767,7 +771,7 @@ class SyncPlayClient(QMainWindow):
             
         if value is not None and self._last_time_pos is not None:
             # Skip sending time_sync and seek events for livestreams
-            if (getattr(self.player, 'duration', None) or 0.0) > 0:
+            if not getattr(self, '_is_live', False):
                 # If difference is more than 1.5 seconds, consider it a seek
                 if abs(value - self._last_time_pos) > 1.5:
                     if self.ignore_next_seek:
@@ -866,12 +870,25 @@ class SyncPlayClient(QMainWindow):
                 self.file_list.setCurrentItem(next_item)
                 self.play_file(next_item)
 
+    def _check_is_live(self, url):
+        def check():
+            ydl_opts = {'dump_single_json': True, 'extract_flat': True, 'quiet': True}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=False)
+                    self._is_live = info.get('is_live', False)
+                except Exception:
+                    self._is_live = False
+        threading.Thread(target=check, daemon=True).start()
+
     def play_file(self, item):
         self._video_loading = True
+        self._is_live = False
         self.player.pause = True
         self._pending_pause = False
         self.player.command('stop')
         self.player.play(item.text())
+        self._check_is_live(item.text())
         if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
             self.ws_thread.send_message({
                 'action': 'play',
