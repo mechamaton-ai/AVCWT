@@ -433,6 +433,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.mouse_moved.connect(self.show_osc)
         self.mpv_signals.eof_reached.connect(self.play_next_item)
         self._current_duration = 0.0
+        self.current_playing_url = None
 
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
@@ -650,10 +651,10 @@ class SyncPlayClient(QMainWindow):
             self.btn_connect.setStyleSheet("background-color: green; color: white;")
             if self.is_host:
                 self.broadcast_playlist()
-                if self.file_list.currentItem():
+                if getattr(self, 'current_playing_url', None):
                     self.ws_thread.send_message({
                         'action': 'play',
-                        'url': self.file_list.currentItem().text()
+                        'url': self.current_playing_url
                     })
                     if self.player.time_pos is not None:
                         self.ws_thread.send_message({
@@ -723,6 +724,7 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(items[0])
                 self._video_loading = True
                 self._is_live = False
+                self.current_playing_url = url
                 self.player.pause = True
                 self._pending_pause = False
                 self.player.command('stop')
@@ -855,7 +857,7 @@ class SyncPlayClient(QMainWindow):
 
     def edit_playlist(self):
         current_urls = [self.file_list.item(i).text() for i in range(self.file_list.count())]
-        current_playing = self.file_list.currentItem().text() if self.file_list.currentItem() else None
+        playing_url = getattr(self, 'current_playing_url', None)
 
         text, ok = QInputDialog.getMultiLineText(self, "Edit Playlist", "Edit URLs (one per line):", '\n'.join(current_urls))
         if ok:
@@ -870,31 +872,45 @@ class SyncPlayClient(QMainWindow):
                 self.file_list.addItem(item)
                 if first_item is None:
                     first_item = item
-                if url == current_playing:
+                if playing_url and url == playing_url:
                     playing_item = item
 
             if playing_item:
                 self.file_list.setCurrentItem(playing_item)
             elif new_urls:
                 # If currently playing was removed, stop and optionally play first
-                if current_playing:
+                if playing_url:
                     self.player.command('stop')
+                    self.current_playing_url = None
                 if first_item:
                     self.file_list.setCurrentItem(first_item)
                     self.play_file(first_item)
             else:
                 self.player.command('stop')
+                self.current_playing_url = None
 
             self.broadcast_playlist()
 
     def play_next_item(self):
-        current_item = self.file_list.currentItem()
-        if current_item:
-            current_row = self.file_list.row(current_item)
-            if current_row < self.file_list.count() - 1:
-                next_item = self.file_list.item(current_row + 1)
-                self.file_list.setCurrentItem(next_item)
-                self.play_file(next_item)
+        if not getattr(self, 'current_playing_url', None):
+            return
+
+        # Try to use current UI selection as starting point if it matches playing URL
+        current_row = -1
+        selected_item = self.file_list.currentItem()
+        if selected_item and selected_item.text() == self.current_playing_url:
+            current_row = self.file_list.row(selected_item)
+        else:
+            # Fallback: find the first matching URL
+            for i in range(self.file_list.count()):
+                if self.file_list.item(i).text() == self.current_playing_url:
+                    current_row = i
+                    break
+
+        if current_row != -1 and current_row < self.file_list.count() - 1:
+            next_item = self.file_list.item(current_row + 1)
+            self.file_list.setCurrentItem(next_item)
+            self.play_file(next_item)
 
     def _check_is_live(self, url):
         def check():
@@ -910,6 +926,7 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self._video_loading = True
         self._is_live = False
+        self.current_playing_url = item.text()
         self.player.pause = True
         self._pending_pause = False
         self.player.command('stop')
