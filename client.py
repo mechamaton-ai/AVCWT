@@ -259,6 +259,12 @@ class SyncPlayClient(QMainWindow):
         self.osc = ModernOscOverlay(self)
         self.osc.show()
 
+        self.top_osc = ModernOscOverlay(self)
+        self.top_osc.show()
+        self.lbl_cache = QLabel("Cache: 00:00")
+        self.top_osc.bg_layout.addWidget(self.lbl_cache)
+        self.top_osc.bg_layout.addStretch()
+
         # Player Controls Bar (now in OSC)
         self.btn_play_pause = QPushButton("Play")
         self.btn_play_pause.setMaximumWidth(60)
@@ -303,6 +309,7 @@ class SyncPlayClient(QMainWindow):
         self.installEventFilter(self)
         self.video_container.installEventFilter(self)
         self.osc.installEventFilter(self)
+        self.top_osc.installEventFilter(self)
 
         # Timers for OSC
         self.osc_timer = QTimer(self)
@@ -467,9 +474,14 @@ class SyncPlayClient(QMainWindow):
         osc_width = max(0, w - margin * 2)
 
         self.osc.setGeometry(global_pos.x() + margin, global_pos.y() + rect.height() - h - margin, osc_width, h)
+        if self.top_osc.isVisible():
+            # Approximate height for the top bar
+            top_h = 40
+            self.top_osc.setGeometry(global_pos.x() + margin, global_pos.y() + margin, osc_width, top_h)
 
     def show_osc(self):
         self.osc.show()
+        self.top_osc.show()
         self.update_osc_position()
         self.hide_osc_timer.start(5000)
 
@@ -479,6 +491,7 @@ class SyncPlayClient(QMainWindow):
             self.hide_osc_timer.start(5000)
             return
         self.osc.hide()
+        self.top_osc.hide()
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.MouseMove or event.type() == QEvent.Type.MouseButtonPress:
@@ -565,9 +578,9 @@ class SyncPlayClient(QMainWindow):
 
     def update_ui_cache_duration(self, cache_duration):
         if cache_duration is not None and cache_duration > 0:
-            self.lbl_time.setToolTip(f"Cache: {self.format_time(cache_duration)}")
+            self.lbl_cache.setText(f"Cache: {self.format_time(cache_duration)}")
         else:
-            self.lbl_time.setToolTip("Cache: 00:00")
+            self.lbl_cache.setText("Cache: 00:00")
 
     def update_ui_pause(self, is_paused):
         self.btn_play_pause.setText("Play" if is_paused else "Pause")
