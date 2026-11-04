@@ -137,6 +137,7 @@ class VolumePopup(QWidget):
 class MpvSignals(QObject):
     time_pos_changed = pyqtSignal(float)
     duration_changed = pyqtSignal(float)
+    cache_duration_changed = pyqtSignal(float)
     pause_changed = pyqtSignal(bool)
     track_list_changed = pyqtSignal(list)
     mouse_moved = pyqtSignal()
@@ -258,6 +259,12 @@ class SyncPlayClient(QMainWindow):
         self.osc = ModernOscOverlay(self)
         self.osc.show()
 
+        self.top_osc = ModernOscOverlay(self)
+        self.top_osc.show()
+        self.lbl_cache = QLabel("Cache: 00:00")
+        self.top_osc.bg_layout.addWidget(self.lbl_cache)
+        self.top_osc.bg_layout.addStretch()
+
         # Player Controls Bar (now in OSC)
         self.btn_play_pause = QPushButton("Play")
         self.btn_play_pause.setMaximumWidth(60)
@@ -302,6 +309,7 @@ class SyncPlayClient(QMainWindow):
         self.installEventFilter(self)
         self.video_container.installEventFilter(self)
         self.osc.installEventFilter(self)
+        self.top_osc.installEventFilter(self)
 
         # Timers for OSC
         self.osc_timer = QTimer(self)
@@ -417,6 +425,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals = MpvSignals()
         self.mpv_signals.time_pos_changed.connect(self.update_ui_time)
         self.mpv_signals.duration_changed.connect(self.update_ui_duration)
+        self.mpv_signals.cache_duration_changed.connect(self.update_ui_cache_duration)
         self.mpv_signals.pause_changed.connect(self.update_ui_pause)
         self.mpv_signals.track_list_changed.connect(self.update_ui_tracks)
         self.mpv_signals.mouse_moved.connect(self.show_osc)
@@ -427,6 +436,7 @@ class SyncPlayClient(QMainWindow):
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
         self.player.observe_property('duration', self.on_mpv_duration)
+        self.player.observe_property('demuxer-cache-duration', self.on_mpv_cache_duration)
         self.player.observe_property('track-list', self.on_mpv_track_list)
         self.player.observe_property('mouse-pos', self.on_mpv_mouse_pos)
         
@@ -464,9 +474,14 @@ class SyncPlayClient(QMainWindow):
         osc_width = max(0, w - margin * 2)
 
         self.osc.setGeometry(global_pos.x() + margin, global_pos.y() + rect.height() - h - margin, osc_width, h)
+        if self.top_osc.isVisible():
+            # Approximate height for the top bar
+            top_h = 40
+            self.top_osc.setGeometry(global_pos.x() + margin, global_pos.y() + margin, osc_width, top_h)
 
     def show_osc(self):
         self.osc.show()
+        self.top_osc.show()
         self.update_osc_position()
         self.hide_osc_timer.start(5000)
 
@@ -476,6 +491,7 @@ class SyncPlayClient(QMainWindow):
             self.hide_osc_timer.start(5000)
             return
         self.osc.hide()
+        self.top_osc.hide()
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.MouseMove or event.type() == QEvent.Type.MouseButtonPress:
@@ -559,6 +575,12 @@ class SyncPlayClient(QMainWindow):
 
         current_time = self.player.time_pos if hasattr(self, 'player') and self.player.time_pos is not None else 0.0
         self.lbl_time.setText(f"{self.format_time(current_time)} / {self.format_time(self._current_duration)}")
+
+    def update_ui_cache_duration(self, cache_duration):
+        if cache_duration is not None and cache_duration > 0:
+            self.lbl_cache.setText(f"Cache: {self.format_time(cache_duration)}")
+        else:
+            self.lbl_cache.setText("Cache: 00:00")
 
     def update_ui_pause(self, is_paused):
         self.btn_play_pause.setText("Play" if is_paused else "Pause")
@@ -734,6 +756,10 @@ class SyncPlayClient(QMainWindow):
                     self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
+
+    def on_mpv_cache_duration(self, _name, value):
+        if value is not None:
+            self.mpv_signals.cache_duration_changed.emit(value)
 
     def on_mpv_track_list(self, _name, value):
         if value is not None:
