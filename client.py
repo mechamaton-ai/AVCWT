@@ -137,6 +137,7 @@ class VolumePopup(QWidget):
 class MpvSignals(QObject):
     time_pos_changed = pyqtSignal(float)
     duration_changed = pyqtSignal(float)
+    cache_duration_changed = pyqtSignal(float)
     pause_changed = pyqtSignal(bool)
     track_list_changed = pyqtSignal(list)
     mouse_moved = pyqtSignal()
@@ -262,6 +263,7 @@ class SyncPlayClient(QMainWindow):
         self.btn_play_pause = QPushButton("Play")
         self.btn_play_pause.setMaximumWidth(60)
         self.lbl_time = QLabel("00:00 / 00:00")
+        self.lbl_cache = QLabel("Cache: 00:00")
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 1000)
@@ -290,6 +292,7 @@ class SyncPlayClient(QMainWindow):
         self.osc.bg_layout.addWidget(self.btn_play_pause)
         self.osc.bg_layout.addWidget(self.slider)
         self.osc.bg_layout.addWidget(self.lbl_time)
+        self.osc.bg_layout.addWidget(self.lbl_cache)
         self.osc.bg_layout.addWidget(QLabel("Audio:"))
         self.osc.bg_layout.addWidget(self.cb_audio)
         self.osc.bg_layout.addWidget(QLabel("Subs:"))
@@ -417,6 +420,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals = MpvSignals()
         self.mpv_signals.time_pos_changed.connect(self.update_ui_time)
         self.mpv_signals.duration_changed.connect(self.update_ui_duration)
+        self.mpv_signals.cache_duration_changed.connect(self.update_ui_cache_duration)
         self.mpv_signals.pause_changed.connect(self.update_ui_pause)
         self.mpv_signals.track_list_changed.connect(self.update_ui_tracks)
         self.mpv_signals.mouse_moved.connect(self.show_osc)
@@ -427,6 +431,7 @@ class SyncPlayClient(QMainWindow):
         self.player.observe_property('pause', self.on_mpv_pause)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
         self.player.observe_property('duration', self.on_mpv_duration)
+        self.player.observe_property('demuxer-cache-duration', self.on_mpv_cache_duration)
         self.player.observe_property('track-list', self.on_mpv_track_list)
         self.player.observe_property('mouse-pos', self.on_mpv_mouse_pos)
         
@@ -559,6 +564,12 @@ class SyncPlayClient(QMainWindow):
 
         current_time = self.player.time_pos if hasattr(self, 'player') and self.player.time_pos is not None else 0.0
         self.lbl_time.setText(f"{self.format_time(current_time)} / {self.format_time(self._current_duration)}")
+
+    def update_ui_cache_duration(self, cache_duration):
+        if cache_duration is not None and cache_duration > 0:
+            self.lbl_cache.setText(f"Cache: {self.format_time(cache_duration)}")
+        else:
+            self.lbl_cache.setText("Cache: 00:00")
 
     def update_ui_pause(self, is_paused):
         self.btn_play_pause.setText("Play" if is_paused else "Pause")
@@ -734,6 +745,10 @@ class SyncPlayClient(QMainWindow):
                     self.player.time_pos = self._pending_seek
                     self._pending_seek = None
                 QTimer.singleShot(300, self.apply_pending_pause)
+
+    def on_mpv_cache_duration(self, _name, value):
+        if value is not None:
+            self.mpv_signals.cache_duration_changed.emit(value)
 
     def on_mpv_track_list(self, _name, value):
         if value is not None:
