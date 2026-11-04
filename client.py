@@ -263,7 +263,6 @@ class SyncPlayClient(QMainWindow):
         self.btn_play_pause = QPushButton("Play")
         self.btn_play_pause.setMaximumWidth(60)
         self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_cache = QLabel("Cache: 00:00")
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 1000)
@@ -292,7 +291,6 @@ class SyncPlayClient(QMainWindow):
         self.osc.bg_layout.addWidget(self.btn_play_pause)
         self.osc.bg_layout.addWidget(self.slider)
         self.osc.bg_layout.addWidget(self.lbl_time)
-        self.osc.bg_layout.addWidget(self.lbl_cache)
         self.osc.bg_layout.addWidget(QLabel("Audio:"))
         self.osc.bg_layout.addWidget(self.cb_audio)
         self.osc.bg_layout.addWidget(QLabel("Subs:"))
@@ -567,9 +565,9 @@ class SyncPlayClient(QMainWindow):
 
     def update_ui_cache_duration(self, cache_duration):
         if cache_duration is not None and cache_duration > 0:
-            self.lbl_cache.setText(f"Cache: {self.format_time(cache_duration)}")
+            self.lbl_time.setToolTip(f"Cache: {self.format_time(cache_duration)}")
         else:
-            self.lbl_cache.setText("Cache: 00:00")
+            self.lbl_time.setToolTip("Cache: 00:00")
 
     def update_ui_pause(self, is_paused):
         self.btn_play_pause.setText("Play" if is_paused else "Pause")
