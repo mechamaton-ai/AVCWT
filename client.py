@@ -218,6 +218,14 @@ class SettingsDialog(QDialog):
         cache_layout.addWidget(self.spin_cache)
         layout.addLayout(cache_layout)
 
+        # Cookie Browser Setting
+        cookie_layout = QHBoxLayout()
+        cookie_layout.addWidget(QLabel("Cookies from Browser:"))
+        self.combo_cookie_browser = QComboBox()
+        self.combo_cookie_browser.addItems(["None", "brave", "chrome", "chromium", "edge", "firefox", "opera", "safari", "vivaldi"])
+        cookie_layout.addWidget(self.combo_cookie_browser)
+        layout.addLayout(cookie_layout)
+
         layout.addSpacing(10)
 
         # Host Server
@@ -321,8 +329,17 @@ class SyncPlayClient(QMainWindow):
         self.hide_osc_timer.setSingleShot(True)
         self.hide_osc_timer.timeout.connect(self.hide_osc)
         
+        self.settings = QSettings("settings.ini", QSettings.Format.IniFormat)
+        # Internal state for settings
+        self.current_cache_size = self.settings.value("cache_size", 150, type=int)
+        self.cookies_browser = self.settings.value("cookies_browser", "None", type=str)
+
         # Initialize MPV
         locale.setlocale(locale.LC_NUMERIC, 'C') # required by mpv
+        ytdl_opts = "extractor-args=youtube:player_client=android"
+        if hasattr(self, 'cookies_browser') and self.cookies_browser != "None":
+            ytdl_opts += f",cookies-from-browser={self.cookies_browser}"
+
         self.player = mpv.MPV(wid=str(int(self.video_container.winId())),
                               input_default_bindings=True,
                               input_vo_keyboard=True,
@@ -330,7 +347,7 @@ class SyncPlayClient(QMainWindow):
                               cache="yes",
                               ytdl=True,
                               script_opts="ytdl_hook-ytdl_path=yt-dlp",
-                              ytdl_raw_options="extractor-args=youtube:player_client=android",
+                              ytdl_raw_options=ytdl_opts,
                               hwdec="auto",
                               ytdl_format="bestvideo[height<=?1080]+bestaudio/best")
 
@@ -379,7 +396,6 @@ class SyncPlayClient(QMainWindow):
         net_header_layout.addWidget(self.lbl_viewers)
         right_layout.addLayout(net_header_layout)
         
-        self.settings = QSettings("settings.ini", QSettings.Format.IniFormat)
         saved_host = self.settings.value("host_address", "localhost:8765")
 
         self.ip_input = QLineEdit()
@@ -395,9 +411,6 @@ class SyncPlayClient(QMainWindow):
         self.btn_connect.clicked.connect(self.connect_to_server)
         self.btn_settings.clicked.connect(self.open_settings)
 
-        # Internal state for settings
-        self.current_cache_size = self.settings.value("cache_size", 150, type=int)
-        
         self.server_thread = None
         self.ws_thread = WebSocketThread()
         self.ws_thread.message_received.connect(self.handle_network_message)
@@ -514,6 +527,16 @@ class SyncPlayClient(QMainWindow):
             self.player.demuxer_max_back_bytes = bytes_val
         except AttributeError:
             pass # Failsafe if player is not fully initialized
+
+    def update_cookies_browser(self, browser: str):
+        self.cookies_browser = browser
+        ytdl_opts = "extractor-args=youtube:player_client=android"
+        if self.cookies_browser != "None":
+            ytdl_opts += f",cookies-from-browser={self.cookies_browser}"
+        try:
+            self.player.ytdl_raw_options = ytdl_opts
+        except AttributeError:
+            pass
 
     def toggle_sidebar(self):
         self.right_panel.setVisible(not self.right_panel.isVisible())
@@ -839,6 +862,7 @@ class SyncPlayClient(QMainWindow):
     def open_settings(self):
         dialog = SettingsDialog(self)
         dialog.spin_cache.setValue(self.current_cache_size)
+        dialog.combo_cookie_browser.setCurrentText(self.cookies_browser)
 
         # Disable button if already hosting
         if self.server_thread is not None:
@@ -846,6 +870,7 @@ class SyncPlayClient(QMainWindow):
             dialog.btn_host.setText("Hosting...")
 
         dialog.spin_cache.valueChanged.connect(self.update_cache_size)
+        dialog.combo_cookie_browser.currentTextChanged.connect(self.update_cookies_browser)
 
         def on_host_clicked():
             dialog.btn_host.setEnabled(False)
@@ -947,6 +972,7 @@ class SyncPlayClient(QMainWindow):
     def closeEvent(self, event):
         self.settings.setValue("host_address", self.ip_input.text())
         self.settings.setValue("cache_size", self.current_cache_size)
+        self.settings.setValue("cookies_browser", self.cookies_browser)
         super().closeEvent(event)
 
 if __name__ == "__main__":
