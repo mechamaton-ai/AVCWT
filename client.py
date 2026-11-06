@@ -476,11 +476,18 @@ class SyncPlayClient(QMainWindow):
         # Ensure the OSC width does not exceed the video container width, and center if needed
         osc_width = max(0, w - margin * 2)
 
-        self.osc.setGeometry(global_pos.x() + margin, global_pos.y() + rect.height() - h - margin, osc_width, h)
+        new_osc_geom = (global_pos.x() + margin, global_pos.y() + rect.height() - h - margin, osc_width, h)
+        if not hasattr(self, '_last_osc_geom') or self._last_osc_geom != new_osc_geom:
+            self.osc.setGeometry(*new_osc_geom)
+            self._last_osc_geom = new_osc_geom
+
         if self.top_osc.isVisible():
             # Approximate height for the top bar
             top_h = 40
-            self.top_osc.setGeometry(global_pos.x() + margin, global_pos.y() + margin, osc_width, top_h)
+            new_top_osc_geom = (global_pos.x() + margin, global_pos.y() + margin, osc_width, top_h)
+            if not hasattr(self, '_last_top_osc_geom') or self._last_top_osc_geom != new_top_osc_geom:
+                self.top_osc.setGeometry(*new_top_osc_geom)
+                self._last_top_osc_geom = new_top_osc_geom
 
     def show_osc(self):
         self.osc.show()
