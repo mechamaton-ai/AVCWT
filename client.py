@@ -330,7 +330,7 @@ class SyncPlayClient(QMainWindow):
                               cache="yes",
                               ytdl=True,
                               script_opts="ytdl_hook-ytdl_path=yt-dlp",
-                              ytdl_raw_options="extractor-args=youtube:player_client=tv",
+                              ytdl_raw_options="extractor-args=youtube:player_client=default",
                               hwdec="auto",
                               ytdl_format="bestvideo[height<=?1080]+bestaudio/best")
 
