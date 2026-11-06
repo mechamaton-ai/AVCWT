@@ -336,7 +336,7 @@ class SyncPlayClient(QMainWindow):
 
         # Initialize MPV
         locale.setlocale(locale.LC_NUMERIC, 'C') # required by mpv
-        ytdl_opts = "extractor-args=youtube:player_client=android"
+        ytdl_opts = "extractor-args=youtube:player_client=tv"
         if hasattr(self, 'cookies_browser') and self.cookies_browser != "None":
             ytdl_opts += f",cookies-from-browser={self.cookies_browser}"
 
@@ -530,7 +530,7 @@ class SyncPlayClient(QMainWindow):
 
     def update_cookies_browser(self, browser: str):
         self.cookies_browser = browser
-        ytdl_opts = "extractor-args=youtube:player_client=android"
+        ytdl_opts = "extractor-args=youtube:player_client=tv"
         if self.cookies_browser != "None":
             ytdl_opts += f",cookies-from-browser={self.cookies_browser}"
         try:
