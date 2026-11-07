@@ -331,7 +331,7 @@ class SyncPlayClient(QMainWindow):
                               ytdl=True,
                               script_opts="ytdl_hook-ytdl_path=yt-dlp",
                               ytdl_raw_options="extractor-args=youtube:player_client=default",
-                              hwdec="auto", gpu_context="x11egl" if sys.platform.startswith("linux") else "auto",
+                              hwdec="auto", vo="gpu",
                               ytdl_format="bestvideo[height<=?1080]+bestaudio/best")
 
         @self.player.event_callback('end_file')
