@@ -106,6 +106,8 @@ struct LibMpvApi {
 impl LibMpvApi {
     fn load() -> Result<Self, String> {
         configure_runtime_environment();
+        #[cfg(target_os = "windows")]
+        ensure_windows_dependencies();
 
         let mut candidates: Vec<PathBuf> = Vec::new();
         let lib_names: &[&str] = if cfg!(target_os = "windows") {
@@ -116,11 +118,9 @@ impl LibMpvApi {
             &["libmpv.so.2", "libmpv.so", "libmpv.so.1"]
         };
 
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                for name in lib_names {
-                    candidates.push(exe_dir.join(name));
-                }
+        for dir in candidate_runtime_dirs() {
+            for name in lib_names {
+                candidates.push(dir.join(name));
             }
         }
         for name in lib_names {
@@ -723,6 +723,30 @@ impl Drop for MpvPlayer {
     }
 }
 
+/// Returns candidate directories to search for bundled binaries/DLLs (`mpv-2.dll`, `yt-dlp.exe`):
+/// the executable directory, its parent/grandparent (for `target/release` or `target/debug`),
+/// and the current working directory.
+pub fn candidate_runtime_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            dirs.push(exe_dir.to_path_buf());
+            if let Some(parent) = exe_dir.parent() {
+                dirs.push(parent.to_path_buf());
+                if let Some(grandparent) = parent.parent() {
+                    dirs.push(grandparent.to_path_buf());
+                }
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if !dirs.iter().any(|d| d == &cwd) {
+            dirs.push(cwd);
+        }
+    }
+    dirs
+}
+
 /// Configures `LC_NUMERIC=C` and adds executable and user binary directories to `PATH`.
 pub fn configure_runtime_environment() {
     extern "C" {
@@ -743,11 +767,9 @@ pub fn configure_runtime_environment() {
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            if !paths.iter().any(|p| p == dir) {
-                paths.push(dir.to_path_buf());
-            }
+    for dir in candidate_runtime_dirs() {
+        if !paths.iter().any(|p| p == &dir) {
+            paths.insert(0, dir);
         }
     }
 
@@ -765,19 +787,89 @@ pub fn configure_runtime_environment() {
     }
 }
 
+/// On Windows, when `AVCWT.exe` is launched by double-clicking, automatically downloads
+/// `yt-dlp.exe` and `mpv-2.dll` next to the executable if they are not already present.
+#[cfg(target_os = "windows")]
+fn ensure_windows_dependencies() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let target_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let has_mpv_dll = candidate_runtime_dirs().iter().any(|dir| {
+        ["mpv-2.dll", "libmpv-2.dll", "mpv-1.dll", "libmpv-1.dll", "mpv.dll"]
+            .iter()
+            .any(|name| dir.join(name).exists())
+    });
+
+    let has_ytdlp = candidate_runtime_dirs()
+        .iter()
+        .any(|dir| dir.join("yt-dlp.exe").exists());
+
+    if has_mpv_dll && has_ytdlp {
+        return;
+    }
+
+    let script = r#"
+$ErrorActionPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+if (-not (Test-Path 'yt-dlp.exe')) {
+    Invoke-WebRequest -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile 'yt-dlp.exe'
+}
+if (-not (Test-Path 'mpv-2.dll') -and -not (Test-Path 'libmpv-2.dll')) {
+    $releases = Invoke-RestMethod -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases?per_page=10'
+    $asset = $null
+    foreach ($rel in $releases) {
+        $asset = $rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-20.*\.7z$' -and $_.name -notmatch 'v3' } | Select-Object -First 1
+        if ($asset) { break }
+    }
+    if ($asset) {
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile 'mpv-dev.7z'
+        if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            7z e mpv-dev.7z '*mpv*.dll' -y | Out-Null
+        } elseif (Test-Path "$env:ProgramFiles\7-Zip\7z.exe") {
+            & "$env:ProgramFiles\7-Zip\7z.exe" e mpv-dev.7z '*mpv*.dll' -y | Out-Null
+        } else {
+            tar -xf mpv-dev.7z '*mpv*.dll'
+        }
+        if ((Test-Path 'libmpv-2.dll') -and -not (Test-Path 'mpv-2.dll')) {
+            Move-Item -Force 'libmpv-2.dll' 'mpv-2.dll'
+        }
+        Remove-Item -Force 'mpv-dev.7z' -ErrorAction SilentlyContinue
+    }
+}
+"#;
+
+    let _ = Command::new("powershell")
+        .current_dir(&target_dir)
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
 /// Asynchronously checks whether a URL is a livestream using `yt-dlp` (matching `_check_is_live` in `client.py`).
 pub fn check_is_live_async(url: String, tx: Sender<(String, bool)>) {
     std::thread::spawn(move || {
         let is_live = if url.starts_with("http://") || url.starts_with("https://") {
-            Command::new("yt-dlp")
-                .args([
-                    "--dump-single-json",
-                    "--flat-playlist",
-                    "--quiet",
-                    "--no-warnings",
-                    &url,
-                ])
-                .output()
+            let mut cmd = Command::new("yt-dlp");
+            cmd.args([
+                "--dump-single-json",
+                "--flat-playlist",
+                "--quiet",
+                "--no-warnings",
+                &url,
+            ]);
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+            cmd.output()
                 .ok()
                 .and_then(|out| {
                     if out.status.success() {

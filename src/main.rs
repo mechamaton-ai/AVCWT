@@ -1,7 +1,18 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use avcwt::app::SyncPlayApp;
 use avcwt::server::SyncServer;
+
+#[cfg(target_os = "windows")]
+fn attach_parent_console() {
+    const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
+    extern "system" {
+        fn AttachConsole(dw_process_id: u32) -> i32;
+    }
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
 
 fn print_usage() {
     println!(
@@ -17,9 +28,14 @@ fn print_usage() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        #[cfg(target_os = "windows")]
+        attach_parent_console();
+    }
+
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
     let mut server_mode = false;
     let mut host = "0.0.0.0".to_string();
     let mut port: u16 = 8765;
