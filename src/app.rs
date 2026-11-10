@@ -161,7 +161,7 @@ impl SyncPlayApp {
         visuals.extreme_bg_color = Color32::from_rgb(25, 25, 25);
         visuals.faint_bg_color = Color32::from_rgb(42, 42, 42);
         visuals.selection.bg_fill = Color32::from_rgb(42, 130, 218);
-        visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+        visuals.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
         visuals.hyperlink_color = Color32::from_rgb(42, 130, 218);
         ctx.set_visuals(visuals);
     }
@@ -602,7 +602,7 @@ impl SyncPlayApp {
                 let list_height = (ui.available_height() - 190.0).max(120.0);
                 Frame::canvas(ui.style())
                     .fill(Color32::from_rgb(25, 25, 25))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(70, 70, 70)))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(70, 70, 70)))
                     .inner_margin(Margin::same(4.0))
                     .show(ui, |ui| {
                         ui.set_min_height(list_height);
