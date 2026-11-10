@@ -849,7 +849,7 @@ impl SyncPlayApp {
         // Top OSC Bar: Cache duration display
         let top_pos = Pos2::new(video_rect.left() + margin, video_rect.top() + margin);
         egui::Area::new(Id::new("top_osc_overlay"))
-            .order(Order::Foreground)
+            .order(Order::Middle)
             .fixed_pos(top_pos)
             .show(ctx, |ui| {
                 Frame::none()
@@ -878,7 +878,7 @@ impl SyncPlayApp {
         let mut volume_btn_rect = None;
 
         egui::Area::new(Id::new("bottom_osc_overlay"))
-            .order(Order::Foreground)
+            .order(Order::Middle)
             .fixed_pos(bottom_pos)
             .show(ctx, |ui| {
                 Frame::none()
@@ -1065,6 +1065,8 @@ impl SyncPlayApp {
             let mut open = self.settings_dialog_open;
             egui::Window::new(RichText::new("Settings").strong().color(Color32::WHITE))
                 .open(&mut open)
+                .order(Order::Foreground)
+                .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .collapsible(false)
                 .resizable(false)
                 .frame(modal_frame)
@@ -1122,6 +1124,8 @@ impl SyncPlayApp {
                     .strong()
                     .color(Color32::WHITE),
             )
+            .order(Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .collapsible(false)
             .resizable(true)
             .frame(modal_frame)
