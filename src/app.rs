@@ -36,6 +36,7 @@ pub struct SyncPlayApp {
     cache_duration: f64,
     is_paused: bool,
     volume: f64,
+    video_aspect: f64,
 
     // Audio & subtitle tracks
     audio_tracks: Vec<(Option<i64>, String)>,
@@ -114,6 +115,7 @@ impl SyncPlayApp {
             cache_duration: 0.0,
             is_paused: true,
             volume: 100.0,
+            video_aspect: 16.0 / 9.0,
 
             audio_tracks: vec![(None, "None".to_string())],
             selected_audio_idx: 0,
@@ -627,6 +629,11 @@ impl SyncPlayApp {
                     self.cache_duration = cache_dur;
                 }
                 MpvEvent::TrackListChanged(tracks) => self.update_ui_tracks(tracks),
+                MpvEvent::VideoAspectChanged(aspect) => {
+                    if aspect > 0.01 && aspect.is_finite() {
+                        self.video_aspect = aspect;
+                    }
+                }
                 MpvEvent::MouseMoved => self.show_osc(),
                 MpvEvent::EofReached => self.play_next_item(),
             }
@@ -773,7 +780,8 @@ impl SyncPlayApp {
                 let response = ui.allocate_rect(video_rect, Sense::click_and_drag());
 
                 // Detect mouse movement or click inside video panel to show OSC
-                let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
+                let pointer_pos =
+                    ctx.input(|i| i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()));
                 if pointer_pos != self.last_pointer_pos {
                     self.last_pointer_pos = pointer_pos;
                     if let Some(pos) = pointer_pos {
@@ -786,9 +794,47 @@ impl SyncPlayApp {
                     self.show_osc();
                 }
 
-                // Render current MPV video frame if available
-                let target_w = (video_rect.width() as usize).clamp(1, 1280);
-                let target_h = (video_rect.height() as usize).clamp(1, 720);
+                // Scroll wheel over the player controls audio volume
+                let combo_open = ComboBox::is_open(ctx, Id::new("osc_audio_combo"))
+                    || ComboBox::is_open(ctx, Id::new("osc_subs_combo"));
+                if !self.settings_dialog_open
+                    && !self.edit_playlist_dialog_open
+                    && !combo_open
+                    && pointer_pos.map_or(false, |pos| video_rect.contains(pos))
+                {
+                    let scroll_y = ctx.input(|i| i.raw_scroll_delta.y);
+                    if scroll_y.abs() > f32::EPSILON {
+                        let step = if scroll_y.abs() >= 15.0 {
+                            (scroll_y / 50.0).signum()
+                                * ((scroll_y.abs() / 50.0).max(1.0) * 5.0)
+                        } else {
+                            scroll_y * 0.1
+                        };
+                        self.change_volume(self.volume + step as f64);
+                        self.show_osc();
+                    }
+                }
+
+                // Compute aspect-ratio-preserving display rect (letterboxed / pillarboxed)
+                let aspect = (self.video_aspect as f32).clamp(0.1, 10.0);
+                let panel_w = video_rect.width().max(1.0);
+                let panel_h = video_rect.height().max(1.0);
+                let panel_aspect = panel_w / panel_h;
+                let (fit_w, fit_h) = if panel_aspect > aspect {
+                    (panel_h * aspect, panel_h)
+                } else {
+                    (panel_w, panel_w / aspect)
+                };
+                let display_rect =
+                    Rect::from_center_size(video_rect.center(), Vec2::new(fit_w, fit_h));
+
+                // Render current MPV video frame at proportional dimensions matching the aspect ratio
+                let max_w = 1280.0_f32;
+                let max_h = 720.0_f32;
+                let scale = (max_w / fit_w).min(max_h / fit_h).min(1.0);
+                let target_w = ((fit_w * scale).round() as usize).max(2);
+                let target_h = ((fit_h * scale).round() as usize).max(2);
+
                 if let Some(ref mut player) = self.player {
                     if let Some(rgba) = player.render_frame_if_updated(target_w, target_h) {
                         let image =
@@ -809,7 +855,7 @@ impl SyncPlayApp {
                 if let Some(ref tex) = self.video_texture {
                     ui.painter().image(
                         tex.id(),
-                        video_rect,
+                        display_rect,
                         Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                         Color32::WHITE,
                     );
@@ -872,6 +918,12 @@ impl SyncPlayApp {
                                 "Cache: 00:00".to_string()
                             };
                             ui.label(RichText::new(cache_text).color(Color32::WHITE));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(format!("Volume: {:.0}%", self.volume))
+                                        .color(Color32::WHITE),
+                                );
+                            });
                         });
                     });
             });

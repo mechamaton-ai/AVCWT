@@ -250,6 +250,7 @@ pub enum MpvEvent {
     CacheDurationChanged(f64),
     PauseChanged(bool),
     TrackListChanged(Vec<MediaTrack>),
+    VideoAspectChanged(f64),
     MouseMoved,
     EofReached,
 }
@@ -358,6 +359,10 @@ impl MpvPlayer {
             observe(4, "demuxer-cache-duration", MPV_FORMAT_DOUBLE);
             observe(5, "track-list/count", MPV_FORMAT_INT64);
             observe(6, "mouse-pos", MPV_FORMAT_NONE);
+            observe(7, "video-out-params/aspect", MPV_FORMAT_DOUBLE);
+            observe(8, "video-params/aspect", MPV_FORMAT_DOUBLE);
+            observe(9, "dwidth", MPV_FORMAT_INT64);
+            observe(10, "dheight", MPV_FORMAT_INT64);
 
             Ok(Self {
                 api,
@@ -498,6 +503,46 @@ impl MpvPlayer {
         }
     }
 
+    fn get_property_double(&self, prop: &str) -> Option<f64> {
+        let cprop = CString::new(prop).ok()?;
+        let mut val: f64 = 0.0;
+        let rc = unsafe {
+            (self.api.mpv_get_property)(
+                self.handle,
+                cprop.as_ptr(),
+                MPV_FORMAT_DOUBLE,
+                &mut val as *mut f64 as *mut c_void,
+            )
+        };
+        if rc >= 0 && val.is_finite() {
+            Some(val)
+        } else {
+            None
+        }
+    }
+
+    fn read_video_aspect(&self) -> Option<f64> {
+        if let Some(aspect) = self.get_property_double("video-out-params/aspect") {
+            if aspect > 0.01 {
+                return Some(aspect);
+            }
+        }
+        if let Some(aspect) = self.get_property_double("video-params/aspect") {
+            if aspect > 0.01 {
+                return Some(aspect);
+            }
+        }
+        if let (Some(dw), Some(dh)) = (
+            self.get_property_i64("dwidth"),
+            self.get_property_i64("dheight"),
+        ) {
+            if dw > 0 && dh > 0 {
+                return Some(dw as f64 / dh as f64);
+            }
+        }
+        None
+    }
+
     fn get_property_bool(&self, prop: &str) -> Option<bool> {
         let cprop = CString::new(prop).ok()?;
         let mut val: c_int = 0;
@@ -615,6 +660,19 @@ impl MpvPlayer {
                             "track-list/count" => {
                                 let tracks = self.read_track_list();
                                 out.push(MpvEvent::TrackListChanged(tracks));
+                            }
+                            "video-out-params/aspect" | "video-params/aspect"
+                                if prop.format == MPV_FORMAT_DOUBLE && !prop.data.is_null() =>
+                            {
+                                let val = unsafe { *(prop.data as *const f64) };
+                                if val > 0.01 && val.is_finite() {
+                                    out.push(MpvEvent::VideoAspectChanged(val));
+                                }
+                            }
+                            "dwidth" | "dheight" => {
+                                if let Some(aspect) = self.read_video_aspect() {
+                                    out.push(MpvEvent::VideoAspectChanged(aspect));
+                                }
                             }
                             "mouse-pos" => {
                                 out.push(MpvEvent::MouseMoved);
