@@ -20,10 +20,22 @@ cargo build --release
 ```
 This produces `target\release\AVCWT.exe`. You can **double-click `AVCWT.exe`** directly in File Explorer to launch the app (it will automatically download `mpv-2.dll` and `yt-dlp.exe` next to itself on first run if they are not already in the folder).
 
-### Linux
+### Linux AppImage (`AVCWT-x86_64.AppImage` — Arch Linux / CachyOS / x86_64)
+Ensure `mpv` and `yt-dlp` are installed (`fuse2` is also used by AppImage runtime if not mounting via `--appimage-extract-and-run`):
+```bash
+sudo pacman -S mpv yt-dlp fuse2
+chmod +x AVCWT-x86_64.AppImage
+```
+Then simply **double-click `AVCWT-x86_64.AppImage`** in your file manager (Dolphin, Thunar, Nautilus, etc.) to launch the app.
+
+### Build from Source on Linux
 Install system dependencies and build:
 ```bash
+# Arch / CachyOS:
+sudo pacman -S mpv yt-dlp ffmpeg
+# Debian / Ubuntu:
 sudo apt install libmpv-dev yt-dlp ffmpeg
+
 cargo run --release
 ```
 
