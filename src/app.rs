@@ -828,12 +828,15 @@ impl SyncPlayApp {
                 let display_rect =
                     Rect::from_center_size(video_rect.center(), Vec2::new(fit_w, fit_h));
 
-                // Render current MPV video frame at proportional dimensions matching the aspect ratio
-                let max_w = 1280.0_f32;
-                let max_h = 720.0_f32;
-                let scale = (max_w / fit_w).min(max_h / fit_h).min(1.0);
-                let target_w = ((fit_w * scale).round() as usize).max(2);
-                let target_h = ((fit_h * scale).round() as usize).max(2);
+                // Render current MPV video frame at proportional physical pixel dimensions matching the aspect ratio
+                let ppp = ctx.pixels_per_point().max(1.0);
+                let phys_w = fit_w * ppp;
+                let phys_h = fit_h * ppp;
+                let max_w = 3840.0_f32;
+                let max_h = 2160.0_f32;
+                let scale = (max_w / phys_w).min(max_h / phys_h).min(1.0);
+                let target_w = ((phys_w * scale).round() as usize).max(2);
+                let target_h = ((phys_h * scale).round() as usize).max(2);
 
                 if let Some(ref mut player) = self.player {
                     if let Some(rgba) = player.render_frame_if_updated(target_w, target_h) {

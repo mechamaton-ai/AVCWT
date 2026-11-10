@@ -299,13 +299,10 @@ impl MpvPlayer {
             set_opt("osc", "no");
             set_opt("cache", "yes");
             set_opt("ytdl", "yes");
-            set_opt("script-opts", "ytdl_hook-ytdl_path=yt-dlp");
-            set_opt(
-                "ytdl-raw-options",
-                "extractor-args=youtube:player_client=android",
-            );
+            let ytdl_opt = format!("ytdl_hook-ytdl_path={}", resolve_ytdlp_executable());
+            set_opt("script-opts", &ytdl_opt);
             set_opt("hwdec", "auto");
-            set_opt("ytdl-format", "bestvideo[height<=?1080]+bestaudio/best");
+            set_opt("ytdl-format", "bestvideo+bestaudio/best");
 
             let init_rc = (api.mpv_initialize)(handle);
             if init_rc < 0 {
@@ -909,11 +906,28 @@ if (-not (Test-Path 'mpv-2.dll') -and -not (Test-Path 'libmpv-2.dll')) {
         .status();
 }
 
+/// Resolves the path to `yt-dlp` (or `yt-dlp.exe` on Windows) from candidate runtime directories,
+/// falling back to `"yt-dlp"` on the system `PATH`.
+pub fn resolve_ytdlp_executable() -> String {
+    let bin_name = if cfg!(target_os = "windows") {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    };
+    for dir in candidate_runtime_dirs() {
+        let candidate = dir.join(bin_name);
+        if candidate.is_file() {
+            return candidate.to_string_lossy().into_owned();
+        }
+    }
+    "yt-dlp".to_string()
+}
+
 /// Asynchronously checks whether a URL is a livestream using `yt-dlp` (matching `_check_is_live` in `client.py`).
 pub fn check_is_live_async(url: String, tx: Sender<(String, bool)>) {
     std::thread::spawn(move || {
         let is_live = if url.starts_with("http://") || url.starts_with("https://") {
-            let mut cmd = Command::new("yt-dlp");
+            let mut cmd = Command::new(resolve_ytdlp_executable());
             cmd.args([
                 "--dump-single-json",
                 "--flat-playlist",
