@@ -287,7 +287,10 @@ impl MpvPlayer {
 
             let set_opt = |k: &str, v: &str| {
                 if let (Ok(ck), Ok(cv)) = (CString::new(k), CString::new(v)) {
-                    (api.mpv_set_option_string)(handle, ck.as_ptr(), cv.as_ptr());
+                    let rc = (api.mpv_set_option_string)(handle, ck.as_ptr(), cv.as_ptr());
+                    if rc < 0 {
+                        warn!("mpv_set_option_string({k}, {v}) failed with code {rc}");
+                    }
                 }
             };
 
@@ -302,13 +305,10 @@ impl MpvPlayer {
             set_opt("script-opts", "ytdl_hook-ytdl_path=yt-dlp");
             set_opt(
                 "ytdl-raw-options",
-                "extractor-args=youtube:player_client=default,android",
+                "extractor-args=youtube:player_client=visionos",
             );
-            set_opt("hwdec", "auto");
-            set_opt(
-                "ytdl-format",
-                "bestvideo[vcodec!^=av01]+bestaudio[audio_channels<=2]/bestvideo+bestaudio/best",
-            );
+            set_opt("hwdec", "no");
+            set_opt("ytdl-format", "bestvideo[vcodec!^=av01]+bestaudio/best");
 
             let init_rc = (api.mpv_initialize)(handle);
             if init_rc < 0 {
@@ -834,7 +834,11 @@ pub fn configure_runtime_environment() {
 
     for dir in candidate_runtime_dirs() {
         if !paths.iter().any(|p| p == &dir) {
-            paths.insert(0, dir);
+            if cfg!(target_os = "windows") {
+                paths.insert(0, dir);
+            } else {
+                paths.push(dir);
+            }
         }
     }
 
@@ -919,15 +923,12 @@ if (-not (Test-Path 'mpv-2.dll') -and -not (Test-Path 'libmpv-2.dll')) {
 /// Resolves the path to `yt-dlp` (or `yt-dlp.exe` on Windows) from candidate runtime directories,
 /// falling back to `"yt-dlp"` on the system `PATH`.
 pub fn resolve_ytdlp_executable() -> String {
-    let bin_name = if cfg!(target_os = "windows") {
-        "yt-dlp.exe"
-    } else {
-        "yt-dlp"
-    };
-    for dir in candidate_runtime_dirs() {
-        let candidate = dir.join(bin_name);
-        if candidate.is_file() {
-            return candidate.to_string_lossy().into_owned();
+    if cfg!(target_os = "windows") {
+        for dir in candidate_runtime_dirs() {
+            let candidate = dir.join("yt-dlp.exe");
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
         }
     }
     "yt-dlp".to_string()
@@ -976,6 +977,15 @@ mod tests {
     #[test]
     fn test_mpv_player_initialization_and_properties() {
         let mut player = MpvPlayer::new().expect("libmpv should initialize cleanly");
+        assert_eq!(
+            player.get_property_string("ytdl-raw-options").as_deref(),
+            Some("extractor-args=youtube:player_client=visionos")
+        );
+        assert_eq!(
+            player.get_property_string("ytdl-format").as_deref(),
+            Some("bestvideo[vcodec!^=av01]+bestaudio/best")
+        );
+        assert_eq!(player.get_property_string("hwdec").as_deref(), Some("no"));
         player.update_cache_size(250);
         player.set_volume(80.0);
         player.set_pause(true);
