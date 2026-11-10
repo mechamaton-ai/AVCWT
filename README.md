@@ -1,26 +1,38 @@
-# AVCWT
+# AVCWT (Rust Edition)
 
-A Python-based desktop application for synchronizing media playback across multiple users over the network. 
+A fast, cross-platform desktop application written in **Rust** for synchronizing media playback across multiple users over the network.
 
 ## Features
-* Cross-platform (Windows & Linux).
-* Embedded MPV player inside a modern PyQt6 GUI.
-* Built-in server functionality - host a session directly from the client.
-* Synchronizes `play`, `pause`, and `seek` events.
-* Manage a local list of video files to play.
+* **Cross-platform** (Windows & Linux) single-binary architecture (`avcwt`).
+* **Embedded `libmpv` video player** inside a native dark-mode `eframe` / `egui` GUI with floating translucent On-Screen Controls (OSC).
+* **Built-in WebSocket Sync Server** — host a session directly from the GUI (`Settings` -> `Host Server`) or headlessly from the CLI (`avcwt --server`).
+* **Synchronized Playback** — synchronizes `play`, `pause`, `seek`, `playlist`, `user_count`, and periodic `time_sync` drift correction across connected peers.
+* **YouTube & Livestream Support** — integrates with `yt-dlp` and automatically detects live streams to disable time-seek jitter.
+* **Track & Cache Management** — switch audio and subtitle tracks on the fly and configure the demuxer network cache size (`settings.ini`).
 
 ## Requirements
-* Python 3.8+
-* PyQt6
-* python-mpv
-* websockets
-* `libmpv` library installed on the system:
-  * **Linux (Debian/Ubuntu):** `sudo apt install libmpv-dev`
-  * **Windows:** Download the latest `mpv-dev` library from [here](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/) (e.g., `mpv-dev-x86_64-....7z`). Extract the archive and copy the `mpv-2.dll` (or `mpv-1.dll`) file directly into the same folder as `client.py`.
+* **Rust 1.75+** (`cargo`, `rustc`)
+* **`libmpv`** shared library installed on the system:
+  * **Linux (Debian/Ubuntu):**
+    ```bash
+    sudo apt install libmpv-dev yt-dlp ffmpeg
+    ```
+  * **Windows:**
+    Download the latest `mpv-dev-x86_64` archive from [shinchiro/mpv-winbuild-cmake](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/) and place `mpv-2.dll` (and optionally `yt-dlp.exe`) in the same folder as `avcwt.exe`.
 
-## Running
-To start the application:
+## Building & Running
+
+### Launch GUI Client
 ```bash
-pip install -r requirements.txt
-python client.py
+cargo run --release
+```
+
+### Run Standalone Headless Sync Server
+```bash
+cargo run --release -- --server --host 0.0.0.0 --port 8765
+```
+
+### Run Automated Tests
+```bash
+cargo test
 ```

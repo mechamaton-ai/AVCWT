@@ -1,0 +1,14 @@
+/target
+Cargo.lock
+__pycache__/
+*.py[cod]
+build/
+dist/
+.venv/
+venv/
+*.dll
+*.7z
+yt-dlp.exe
+ffmpeg.exe
+ffprobe.exe
+settings.ini
