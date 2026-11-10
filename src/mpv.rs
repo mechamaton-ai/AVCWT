@@ -299,10 +299,16 @@ impl MpvPlayer {
             set_opt("osc", "no");
             set_opt("cache", "yes");
             set_opt("ytdl", "yes");
-            let ytdl_opt = format!("ytdl_hook-ytdl_path={}", resolve_ytdlp_executable());
-            set_opt("script-opts", &ytdl_opt);
+            set_opt("script-opts", "ytdl_hook-ytdl_path=yt-dlp");
+            set_opt(
+                "ytdl-raw-options",
+                "extractor-args=youtube:player_client=default,android",
+            );
             set_opt("hwdec", "auto");
-            set_opt("ytdl-format", "bestvideo+bestaudio/best");
+            set_opt(
+                "ytdl-format",
+                "bestvideo[vcodec!^=av01]+bestaudio[audio_channels<=2]/bestvideo+bestaudio/best",
+            );
 
             let init_rc = (api.mpv_initialize)(handle);
             if init_rc < 0 {
@@ -783,6 +789,10 @@ impl Drop for MpvPlayer {
 /// and the current working directory.
 pub fn candidate_runtime_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+    if let Ok(appdir) = std::env::var("APPDIR") {
+        let appdir_bin = PathBuf::from(appdir).join("usr").join("bin");
+        dirs.push(appdir_bin);
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             dirs.push(exe_dir.to_path_buf());
