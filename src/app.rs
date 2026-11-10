@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use egui::{
     Align, Color32, ComboBox, Context, Frame, Id, Key, Layout, Margin, Order, Pos2, Rect,
-    RichText, Rounding, Sense, Slider, Stroke, TextureHandle, TextureOptions, Vec2,
-    ViewportCommand,
+    RichText, Rounding, Sense, Slider, Stroke, SystemTheme, TextureHandle, TextureOptions, Theme,
+    ThemePreference, Vec2, ViewportCommand,
 };
 use log::{info, warn};
 
@@ -155,15 +155,68 @@ impl SyncPlayApp {
     }
 
     pub fn apply_dark_fusion_theme(ctx: &Context) {
+        ctx.set_theme(ThemePreference::Dark);
+        ctx.send_viewport_cmd(ViewportCommand::SetTheme(SystemTheme::Dark));
+
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(53, 53, 53);
-        visuals.window_fill = Color32::from_rgb(53, 53, 53);
-        visuals.extreme_bg_color = Color32::from_rgb(25, 25, 25);
-        visuals.faint_bg_color = Color32::from_rgb(42, 42, 42);
+        visuals.dark_mode = true;
+        visuals.override_text_color = Some(Color32::from_rgb(240, 240, 240));
+        visuals.panel_fill = Color32::from_rgb(45, 45, 48);
+        visuals.window_fill = Color32::from_rgb(42, 42, 45);
+        visuals.window_stroke = Stroke::new(1.0_f32, Color32::from_rgb(80, 80, 86));
+        visuals.window_rounding = Rounding::same(8.0);
+        visuals.menu_rounding = Rounding::same(6.0);
+        visuals.extreme_bg_color = Color32::from_rgb(24, 24, 26);
+        visuals.faint_bg_color = Color32::from_rgb(35, 35, 38);
+        visuals.code_bg_color = Color32::from_rgb(30, 30, 32);
+
+        // Non-interactive widgets & window backgrounds
+        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(42, 42, 45);
+        visuals.widgets.noninteractive.weak_bg_fill = Color32::from_rgb(42, 42, 45);
+        visuals.widgets.noninteractive.bg_stroke =
+            Stroke::new(1.0_f32, Color32::from_rgb(75, 75, 80));
+        visuals.widgets.noninteractive.fg_stroke =
+            Stroke::new(1.0_f32, Color32::from_rgb(235, 235, 235));
+        visuals.widgets.noninteractive.rounding = Rounding::same(6.0);
+
+        // Interactive widgets (buttons, text boxes, sliders, combo boxes) at rest
+        visuals.widgets.inactive.bg_fill = Color32::from_rgb(62, 62, 66);
+        visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(62, 62, 66);
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(90, 90, 96));
+        visuals.widgets.inactive.fg_stroke =
+            Stroke::new(1.0_f32, Color32::from_rgb(242, 242, 242));
+        visuals.widgets.inactive.rounding = Rounding::same(6.0);
+
+        // Hovered interactive widgets
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(80, 80, 86);
+        visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(80, 80, 86);
+        visuals.widgets.hovered.bg_stroke =
+            Stroke::new(1.0_f32, Color32::from_rgb(120, 120, 128));
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
+        visuals.widgets.hovered.rounding = Rounding::same(6.0);
+
+        // Active / pressed interactive widgets
+        visuals.widgets.active.bg_fill = Color32::from_rgb(42, 130, 218);
+        visuals.widgets.active.weak_bg_fill = Color32::from_rgb(42, 130, 218);
+        visuals.widgets.active.bg_stroke =
+            Stroke::new(1.0_f32, Color32::from_rgb(100, 170, 245));
+        visuals.widgets.active.fg_stroke = Stroke::new(2.0_f32, Color32::WHITE);
+        visuals.widgets.active.rounding = Rounding::same(6.0);
+
+        // Open menu / combo-box widgets
+        visuals.widgets.open.bg_fill = Color32::from_rgb(55, 55, 60);
+        visuals.widgets.open.weak_bg_fill = Color32::from_rgb(55, 55, 60);
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(42, 130, 218));
+        visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
+        visuals.widgets.open.rounding = Rounding::same(6.0);
+
         visuals.selection.bg_fill = Color32::from_rgb(42, 130, 218);
         visuals.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
         visuals.hyperlink_color = Color32::from_rgb(42, 130, 218);
-        ctx.set_visuals(visuals);
+
+        // Set for BOTH Dark and Light theme slots so OS Light Mode on Windows never turns widgets white
+        ctx.set_visuals_of(Theme::Dark, visuals.clone());
+        ctx.set_visuals_of(Theme::Light, visuals);
     }
 
     fn show_osc(&mut self) {
@@ -587,23 +640,25 @@ impl SyncPlayApp {
 
         egui::SidePanel::right("right_sidebar_panel")
             .resizable(true)
-            .default_width(240.0)
-            .min_width(190.0)
+            .default_width(250.0)
+            .min_width(200.0)
             .frame(
                 Frame::side_top_panel(&ctx.style())
-                    .fill(Color32::from_rgb(53, 53, 53))
-                    .inner_margin(Margin::same(10.0)),
+                    .fill(Color32::from_rgb(45, 45, 48))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(65, 65, 70)))
+                    .inner_margin(Margin::same(12.0)),
             )
             .show(ctx, |ui| {
                 ui.label(RichText::new("Playlist").strong().color(Color32::WHITE));
-                ui.add_space(4.0);
+                ui.add_space(6.0);
 
                 // Playlist box
-                let list_height = (ui.available_height() - 190.0).max(120.0);
+                let list_height = (ui.available_height() - 205.0).max(120.0);
                 Frame::canvas(ui.style())
-                    .fill(Color32::from_rgb(25, 25, 25))
-                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(70, 70, 70)))
-                    .inner_margin(Margin::same(4.0))
+                    .fill(Color32::from_rgb(24, 24, 26))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(70, 70, 76)))
+                    .rounding(Rounding::same(6.0))
+                    .inner_margin(Margin::same(6.0))
                     .show(ui, |ui| {
                         ui.set_min_height(list_height);
                         ui.set_max_height(list_height);
@@ -613,7 +668,10 @@ impl SyncPlayApp {
                                 let mut double_clicked_idx = None;
                                 for (idx, item) in self.playlist.iter().enumerate() {
                                     let is_selected = self.selected_playlist_idx == Some(idx);
-                                    let resp = ui.selectable_label(is_selected, item);
+                                    let resp = ui.selectable_label(
+                                        is_selected,
+                                        RichText::new(item).color(Color32::from_rgb(235, 235, 235)),
+                                    );
                                     if resp.clicked() {
                                         self.selected_playlist_idx = Some(idx);
                                     }
@@ -630,56 +688,74 @@ impl SyncPlayApp {
                             });
                     });
 
-                ui.add_space(6.0);
+                ui.add_space(8.0);
                 if ui
-                    .add_sized([ui.available_width(), 28.0], egui::Button::new("Edit Playlist"))
+                    .add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::Button::new(RichText::new("Edit Playlist").color(Color32::WHITE))
+                            .fill(Color32::from_rgb(62, 62, 66))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(90, 90, 96)))
+                            .rounding(Rounding::same(6.0)),
+                    )
                     .clicked()
                 {
                     self.edit_playlist_buffer = self.playlist.join("\n");
                     self.edit_playlist_dialog_open = true;
                 }
 
-                ui.add_space(16.0);
+                ui.add_space(14.0);
                 if ui
-                    .add_sized([ui.available_width(), 28.0], egui::Button::new("Settings"))
+                    .add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::Button::new(RichText::new("Settings").color(Color32::WHITE))
+                            .fill(Color32::from_rgb(62, 62, 66))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(90, 90, 96)))
+                            .rounding(Rounding::same(6.0)),
+                    )
                     .clicked()
                 {
                     self.settings_dialog_open = true;
                 }
 
-                ui.add_space(10.0);
+                ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Host Info").color(Color32::WHITE));
+                    ui.label(RichText::new("Host Info").strong().color(Color32::WHITE));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("Viewers: {}", self.viewers_count))
-                                .color(Color32::WHITE),
+                                .color(Color32::from_rgb(200, 200, 205)),
                         );
                     });
                 });
 
                 ui.add_space(4.0);
                 ui.add_sized(
-                    [ui.available_width(), 26.0],
-                    egui::TextEdit::singleline(&mut self.ip_input).hint_text("localhost:8765"),
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut self.ip_input)
+                        .hint_text("localhost:8765")
+                        .text_color(Color32::WHITE),
                 );
 
-                ui.add_space(6.0);
+                ui.add_space(8.0);
                 let (btn_text, btn_enabled, btn_fill) = match self.conn_state {
-                    ConnectionUiState::Disconnected => ("Connect", true, None),
-                    ConnectionUiState::Connecting => ("Connecting...", false, None),
+                    ConnectionUiState::Disconnected => {
+                        ("Connect", true, Color32::from_rgb(42, 130, 218))
+                    }
+                    ConnectionUiState::Connecting => {
+                        ("Connecting...", false, Color32::from_rgb(70, 70, 76))
+                    }
                     ConnectionUiState::Connected => {
-                        ("Connected", false, Some(Color32::from_rgb(0, 128, 0)))
+                        ("Connected", false, Color32::from_rgb(36, 140, 60))
                     }
                 };
 
-                let mut btn = egui::Button::new(RichText::new(btn_text).color(Color32::WHITE));
-                if let Some(fill) = btn_fill {
-                    btn = btn.fill(fill);
-                }
+                let btn = egui::Button::new(RichText::new(btn_text).strong().color(Color32::WHITE))
+                    .fill(btn_fill)
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(100, 100, 108)))
+                    .rounding(Rounding::same(6.0));
                 if ui
                     .add_enabled_ui(btn_enabled, |ui| {
-                        ui.add_sized([ui.available_width(), 28.0], btn)
+                        ui.add_sized([ui.available_width(), 30.0], btn)
                     })
                     .inner
                     .clicked()
@@ -807,27 +883,35 @@ impl SyncPlayApp {
             .show(ctx, |ui| {
                 Frame::none()
                     .fill(osc_bg)
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        Color32::from_rgba_unmultiplied(80, 80, 86, 180),
+                    ))
                     .rounding(Rounding::same(15.0))
                     .inner_margin(Margin::symmetric(12.0, 10.0))
                     .show(ui, |ui| {
                         ui.set_width((osc_width - 24.0).max(100.0));
                         ui.horizontal(|ui| {
+                            let osc_btn = |label: &str| {
+                                egui::Button::new(
+                                    RichText::new(label).strong().color(Color32::WHITE),
+                                )
+                                .fill(Color32::from_rgba_unmultiplied(62, 62, 68, 220))
+                                .stroke(Stroke::new(
+                                    1.0_f32,
+                                    Color32::from_rgba_unmultiplied(105, 105, 112, 180),
+                                ))
+                                .rounding(Rounding::same(6.0))
+                            };
+
                             // Play / Pause button
                             let play_label = if self.is_paused { "Play" } else { "Pause" };
-                            if ui
-                                .add_sized(
-                                    [56.0, 26.0],
-                                    egui::Button::new(
-                                        RichText::new(play_label).strong().color(Color32::WHITE),
-                                    ),
-                                )
-                                .clicked()
-                            {
+                            if ui.add_sized([58.0, 26.0], osc_btn(play_label)).clicked() {
                                 self.toggle_playback();
                             }
 
                             // Calculate remaining width for the horizontal seek slider
-                            let right_controls_width = 430.0_f32.min(ui.available_width() * 0.72);
+                            let right_controls_width = 435.0_f32.min(ui.available_width() * 0.72);
                             let slider_width =
                                 (ui.available_width() - right_controls_width).max(40.0);
 
@@ -866,7 +950,9 @@ impl SyncPlayApp {
                                 .to_string();
                             ComboBox::from_id_salt("osc_audio_combo")
                                 .width(80.0)
-                                .selected_text(current_audio_label)
+                                .selected_text(
+                                    RichText::new(current_audio_label).color(Color32::WHITE),
+                                )
                                 .show_ui(ui, |ui| {
                                     for (idx, (track_id, label)) in
                                         self.audio_tracks.iter().enumerate()
@@ -896,7 +982,9 @@ impl SyncPlayApp {
                                 .to_string();
                             ComboBox::from_id_salt("osc_subs_combo")
                                 .width(80.0)
-                                .selected_text(current_sub_label)
+                                .selected_text(
+                                    RichText::new(current_sub_label).color(Color32::WHITE),
+                                )
                                 .show_ui(ui, |ui| {
                                     for (idx, (track_id, label)) in
                                         self.sub_tracks.iter().enumerate()
@@ -917,25 +1005,19 @@ impl SyncPlayApp {
                                 });
 
                             // Volume button
-                            let vol_resp = ui.add_sized([28.0, 26.0], egui::Button::new("🔊"));
+                            let vol_resp = ui.add_sized([30.0, 26.0], osc_btn("🔊"));
                             volume_btn_rect = Some(vol_resp.rect);
                             if vol_resp.clicked() {
                                 self.volume_popup_open = !self.volume_popup_open;
                             }
 
                             // Toggle Sidebar button
-                            if ui
-                                .add_sized([28.0, 26.0], egui::Button::new("☰"))
-                                .clicked()
-                            {
+                            if ui.add_sized([30.0, 26.0], osc_btn("☰")).clicked() {
                                 self.toggle_sidebar();
                             }
 
                             // Fullscreen button
-                            if ui
-                                .add_sized([28.0, 26.0], egui::Button::new("⛶"))
-                                .clicked()
-                            {
+                            if ui.add_sized([30.0, 26.0], osc_btn("⛶")).clicked() {
                                 self.toggle_fullscreen(ctx);
                             }
                         });
@@ -972,35 +1054,55 @@ impl SyncPlayApp {
     }
 
     fn render_modals(&mut self, ctx: &Context) {
+        let modal_frame = Frame::window(&ctx.style())
+            .fill(Color32::from_rgb(42, 42, 45))
+            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(85, 85, 92)))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(Margin::same(14.0));
+
         // Settings Dialog
         if self.settings_dialog_open {
             let mut open = self.settings_dialog_open;
-            egui::Window::new("Settings")
+            egui::Window::new(RichText::new("Settings").strong().color(Color32::WHITE))
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
+                .frame(modal_frame)
                 .default_size(Vec2::new(300.0, 150.0))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label("Network Cache (MB):");
-                        let mut cache_mb = self.current_cache_size;
-                        if ui
-                            .add(egui::DragValue::new(&mut cache_mb).range(10..=2000))
-                            .changed()
-                        {
-                            self.update_cache_size(cache_mb);
-                        }
+                        ui.label(RichText::new("Network Cache (MB):").color(Color32::WHITE));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let mut cache_mb = self.current_cache_size;
+                            if ui
+                                .add(egui::DragValue::new(&mut cache_mb).range(10..=2000))
+                                .changed()
+                            {
+                                self.update_cache_size(cache_mb);
+                            }
+                        });
                     });
 
-                    ui.add_space(12.0);
+                    ui.add_space(14.0);
                     let host_label = if self.server_running {
                         "Hosting..."
                     } else {
                         "Host Server"
                     };
+                    let host_btn = egui::Button::new(
+                        RichText::new(host_label).strong().color(Color32::WHITE),
+                    )
+                    .fill(if self.server_running {
+                        Color32::from_rgb(36, 140, 60)
+                    } else {
+                        Color32::from_rgb(42, 130, 218)
+                    })
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(100, 100, 108)))
+                    .rounding(Rounding::same(6.0));
+
                     if ui
                         .add_enabled_ui(!self.server_running, |ui| {
-                            ui.add_sized([ui.available_width(), 28.0], egui::Button::new(host_label))
+                            ui.add_sized([ui.available_width(), 30.0], host_btn)
                         })
                         .inner
                         .clicked()
@@ -1015,32 +1117,62 @@ impl SyncPlayApp {
         if self.edit_playlist_dialog_open {
             let mut close_dialog = false;
             let mut apply_changes = false;
-            egui::Window::new("Edit Playlist")
-                .collapsible(false)
-                .resizable(true)
-                .default_size(Vec2::new(420.0, 260.0))
-                .show(ctx, |ui| {
-                    ui.label("Edit URLs (one per line):");
-                    ui.add_space(4.0);
-                    egui::ScrollArea::vertical()
-                        .max_height(180.0)
-                        .show(ui, |ui| {
-                            ui.add_sized(
-                                [ui.available_width(), 160.0],
-                                egui::TextEdit::multiline(&mut self.edit_playlist_buffer),
-                            );
-                        });
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("OK").clicked() {
-                            apply_changes = true;
-                            close_dialog = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close_dialog = true;
-                        }
+            egui::Window::new(
+                RichText::new("Edit Playlist")
+                    .strong()
+                    .color(Color32::WHITE),
+            )
+            .collapsible(false)
+            .resizable(true)
+            .frame(modal_frame)
+            .default_size(Vec2::new(440.0, 280.0))
+            .show(ctx, |ui| {
+                ui.label(RichText::new("Edit URLs (one per line):").color(Color32::WHITE));
+                ui.add_space(6.0);
+
+                Frame::canvas(ui.style())
+                    .fill(Color32::from_rgb(24, 24, 26))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(75, 75, 82)))
+                    .rounding(Rounding::same(6.0))
+                    .inner_margin(Margin::same(6.0))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(180.0)
+                            .show(ui, |ui| {
+                                ui.add_sized(
+                                    [ui.available_width(), 170.0],
+                                    egui::TextEdit::multiline(&mut self.edit_playlist_buffer)
+                                        .text_color(Color32::WHITE)
+                                        .frame(false)
+                                        .desired_width(f32::INFINITY)
+                                        .desired_rows(8),
+                                );
+                            });
                     });
+
+                ui.add_space(10.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let cancel_btn =
+                        egui::Button::new(RichText::new("Cancel").color(Color32::WHITE))
+                            .fill(Color32::from_rgb(62, 62, 66))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(90, 90, 96)))
+                            .rounding(Rounding::same(6.0));
+                    if ui.add_sized([84.0, 28.0], cancel_btn).clicked() {
+                        close_dialog = true;
+                    }
+
+                    ui.add_space(6.0);
+                    let ok_btn =
+                        egui::Button::new(RichText::new("OK").strong().color(Color32::WHITE))
+                            .fill(Color32::from_rgb(42, 130, 218))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(90, 160, 235)))
+                            .rounding(Rounding::same(6.0));
+                    if ui.add_sized([84.0, 28.0], ok_btn).clicked() {
+                        apply_changes = true;
+                        close_dialog = true;
+                    }
                 });
+            });
 
             if apply_changes {
                 let buf = self.edit_playlist_buffer.clone();
@@ -1055,6 +1187,9 @@ impl SyncPlayApp {
 
 impl eframe::App for SyncPlayApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        if !ctx.style().visuals.dark_mode || ctx.theme() != Theme::Dark {
+            Self::apply_dark_fusion_theme(ctx);
+        }
         self.process_background_events(ctx);
 
         // Global shortcuts: Space toggles playback (when not typing in a text field), Escape exits fullscreen
