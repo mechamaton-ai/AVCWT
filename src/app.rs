@@ -844,7 +844,12 @@ impl SyncPlayApp {
     fn render_osc_overlays(&mut self, ctx: &Context, video_rect: Rect) {
         let margin = 20.0;
         let osc_width = (video_rect.width() - margin * 2.0).max(120.0);
+        let inner_osc_width = (osc_width - 24.0).max(96.0);
         let osc_bg = Color32::from_rgba_unmultiplied(30, 30, 30, 200);
+        let osc_stroke = Stroke::new(
+            1.0_f32,
+            Color32::from_rgba_unmultiplied(80, 80, 86, 180),
+        );
 
         // Top OSC Bar: Cache duration display
         let top_pos = Pos2::new(video_rect.left() + margin, video_rect.top() + margin);
@@ -854,10 +859,12 @@ impl SyncPlayApp {
             .show(ctx, |ui| {
                 Frame::none()
                     .fill(osc_bg)
+                    .stroke(osc_stroke)
                     .rounding(Rounding::same(15.0))
                     .inner_margin(Margin::symmetric(12.0, 8.0))
                     .show(ui, |ui| {
-                        ui.set_width((osc_width - 24.0).max(80.0));
+                        ui.set_min_width(inner_osc_width);
+                        ui.set_max_width(inner_osc_width);
                         ui.horizontal(|ui| {
                             let cache_text = if self.cache_duration > 0.0 {
                                 format!("Cache: {}", format_time(Some(self.cache_duration)))
@@ -883,14 +890,13 @@ impl SyncPlayApp {
             .show(ctx, |ui| {
                 Frame::none()
                     .fill(osc_bg)
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        Color32::from_rgba_unmultiplied(80, 80, 86, 180),
-                    ))
+                    .stroke(osc_stroke)
                     .rounding(Rounding::same(15.0))
                     .inner_margin(Margin::symmetric(12.0, 10.0))
                     .show(ui, |ui| {
-                        ui.set_width((osc_width - 24.0).max(100.0));
+                        ui.set_min_width(inner_osc_width);
+                        ui.set_max_width(inner_osc_width);
+                        ui.spacing_mut().item_spacing.x = 6.0;
                         ui.horizontal(|ui| {
                             let osc_btn = |label: &str| {
                                 egui::Button::new(
@@ -904,122 +910,122 @@ impl SyncPlayApp {
                                 .rounding(Rounding::same(6.0))
                             };
 
-                            // Play / Pause button
+                            // Play / Pause button on the left
                             let play_label = if self.is_paused { "Play" } else { "Pause" };
-                            if ui.add_sized([58.0, 26.0], osc_btn(play_label)).clicked() {
+                            if ui.add_sized([50.0, 26.0], osc_btn(play_label)).clicked() {
                                 self.toggle_playback();
                             }
 
-                            // Calculate remaining width for the horizontal seek slider
-                            let right_controls_width = 435.0_f32.min(ui.available_width() * 0.72);
-                            let slider_width =
-                                (ui.available_width() - right_controls_width).max(40.0);
+                            // Lay out right-side controls from right to left, then fill the exact remaining space with the seek slider
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                // Fullscreen button
+                                if ui.add_sized([26.0, 26.0], osc_btn("⛶")).clicked() {
+                                    self.toggle_fullscreen(ctx);
+                                }
 
-                            let mut slider_val = if self.current_duration > 0.0 {
-                                ((self.current_time / self.current_duration) * 1000.0)
-                                    .clamp(0.0, 1000.0)
-                            } else {
-                                0.0
-                            };
+                                // Toggle Sidebar button
+                                if ui.add_sized([26.0, 26.0], osc_btn("☰")).clicked() {
+                                    self.toggle_sidebar();
+                                }
 
-                            ui.spacing_mut().slider_width = slider_width;
-                            let slider_resp = ui.add_enabled(
-                                self.current_duration > 0.0,
-                                Slider::new(&mut slider_val, 0.0..=1000.0).show_value(false),
-                            );
-                            if slider_resp.dragged() || slider_resp.changed() {
-                                self.last_mouse_activity = Instant::now();
-                                self.seek_video(slider_val);
-                            }
+                                // Volume button
+                                let vol_resp = ui.add_sized([26.0, 26.0], osc_btn("🔊"));
+                                volume_btn_rect = Some(vol_resp.rect);
+                                if vol_resp.clicked() {
+                                    self.volume_popup_open = !self.volume_popup_open;
+                                }
 
-                            // Time label
-                            let time_str = format!(
-                                "{} / {}",
-                                format_time(Some(self.current_time)),
-                                format_time(Some(self.current_duration))
-                            );
-                            ui.label(RichText::new(time_str).color(Color32::WHITE));
-
-                            // Audio track selector
-                            ui.label(RichText::new("Audio:").color(Color32::WHITE));
-                            let current_audio_label = self
-                                .audio_tracks
-                                .get(self.selected_audio_idx)
-                                .map(|(_, l)| l.as_str())
-                                .unwrap_or("None")
-                                .to_string();
-                            ComboBox::from_id_salt("osc_audio_combo")
-                                .width(80.0)
-                                .selected_text(
-                                    RichText::new(current_audio_label).color(Color32::WHITE),
-                                )
-                                .show_ui(ui, |ui| {
-                                    for (idx, (track_id, label)) in
-                                        self.audio_tracks.iter().enumerate()
-                                    {
-                                        if ui
-                                            .selectable_value(
-                                                &mut self.selected_audio_idx,
-                                                idx,
-                                                label,
-                                            )
-                                            .changed()
+                                // Subtitle track selector
+                                let current_sub_label = self
+                                    .sub_tracks
+                                    .get(self.selected_sub_idx)
+                                    .map(|(_, l)| l.as_str())
+                                    .unwrap_or("None")
+                                    .to_string();
+                                ComboBox::from_id_salt("osc_subs_combo")
+                                    .width(64.0)
+                                    .selected_text(
+                                        RichText::new(current_sub_label).color(Color32::WHITE),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (idx, (track_id, label)) in
+                                            self.sub_tracks.iter().enumerate()
                                         {
-                                            if let Some(ref player) = self.player {
-                                                player.set_audio_track(*track_id);
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.selected_sub_idx,
+                                                    idx,
+                                                    label,
+                                                )
+                                                .changed()
+                                            {
+                                                if let Some(ref player) = self.player {
+                                                    player.set_subtitle_track(*track_id);
+                                                }
                                             }
                                         }
-                                    }
-                                });
+                                    });
+                                ui.label(RichText::new("Subs:").color(Color32::WHITE));
 
-                            // Subtitle track selector
-                            ui.label(RichText::new("Subs:").color(Color32::WHITE));
-                            let current_sub_label = self
-                                .sub_tracks
-                                .get(self.selected_sub_idx)
-                                .map(|(_, l)| l.as_str())
-                                .unwrap_or("None")
-                                .to_string();
-                            ComboBox::from_id_salt("osc_subs_combo")
-                                .width(80.0)
-                                .selected_text(
-                                    RichText::new(current_sub_label).color(Color32::WHITE),
-                                )
-                                .show_ui(ui, |ui| {
-                                    for (idx, (track_id, label)) in
-                                        self.sub_tracks.iter().enumerate()
-                                    {
-                                        if ui
-                                            .selectable_value(
-                                                &mut self.selected_sub_idx,
-                                                idx,
-                                                label,
-                                            )
-                                            .changed()
+                                // Audio track selector
+                                let current_audio_label = self
+                                    .audio_tracks
+                                    .get(self.selected_audio_idx)
+                                    .map(|(_, l)| l.as_str())
+                                    .unwrap_or("None")
+                                    .to_string();
+                                ComboBox::from_id_salt("osc_audio_combo")
+                                    .width(64.0)
+                                    .selected_text(
+                                        RichText::new(current_audio_label).color(Color32::WHITE),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (idx, (track_id, label)) in
+                                            self.audio_tracks.iter().enumerate()
                                         {
-                                            if let Some(ref player) = self.player {
-                                                player.set_subtitle_track(*track_id);
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.selected_audio_idx,
+                                                    idx,
+                                                    label,
+                                                )
+                                                .changed()
+                                            {
+                                                if let Some(ref player) = self.player {
+                                                    player.set_audio_track(*track_id);
+                                                }
                                             }
                                         }
-                                    }
-                                });
+                                    });
+                                ui.label(RichText::new("Audio:").color(Color32::WHITE));
 
-                            // Volume button
-                            let vol_resp = ui.add_sized([30.0, 26.0], osc_btn("🔊"));
-                            volume_btn_rect = Some(vol_resp.rect);
-                            if vol_resp.clicked() {
-                                self.volume_popup_open = !self.volume_popup_open;
-                            }
+                                // Time label
+                                let time_str = format!(
+                                    "{} / {}",
+                                    format_time(Some(self.current_time)),
+                                    format_time(Some(self.current_duration))
+                                );
+                                ui.label(RichText::new(time_str).color(Color32::WHITE));
 
-                            // Toggle Sidebar button
-                            if ui.add_sized([30.0, 26.0], osc_btn("☰")).clicked() {
-                                self.toggle_sidebar();
-                            }
+                                // Seek slider takes the exact remaining space between Play and Time label
+                                let mut slider_val = if self.current_duration > 0.0 {
+                                    ((self.current_time / self.current_duration) * 1000.0)
+                                        .clamp(0.0, 1000.0)
+                                } else {
+                                    0.0
+                                };
 
-                            // Fullscreen button
-                            if ui.add_sized([30.0, 26.0], osc_btn("⛶")).clicked() {
-                                self.toggle_fullscreen(ctx);
-                            }
+                                let slider_width = (ui.available_width() - 14.0).max(20.0);
+                                ui.spacing_mut().slider_width = slider_width;
+                                let slider_resp = ui.add_enabled(
+                                    self.current_duration > 0.0,
+                                    Slider::new(&mut slider_val, 0.0..=1000.0).show_value(false),
+                                );
+                                if slider_resp.dragged() || slider_resp.changed() {
+                                    self.last_mouse_activity = Instant::now();
+                                    self.seek_video(slider_val);
+                                }
+                            });
                         });
                     });
             });
