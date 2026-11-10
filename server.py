@@ -15,6 +15,41 @@ class SyncServer:
         self.current_time = 0.0
         self.is_paused = True
         self.client_times = {}
+        self.buffering_clients = set()
+
+    async def broadcast_buffering_state(self):
+        if not self.clients:
+            return
+        tasks = []
+        if self.buffering_clients:
+            for client in self.clients:
+                other_buffering = any(bc != client for bc in self.buffering_clients)
+                if other_buffering:
+                    tasks.append(asyncio.create_task(client.send(json.dumps({
+                        "action": "buffering",
+                        "state": True
+                    }))))
+                    tasks.append(asyncio.create_task(client.send(json.dumps({
+                        "action": "pause",
+                        "state": True
+                    }))))
+                else:
+                    tasks.append(asyncio.create_task(client.send(json.dumps({
+                        "action": "buffering",
+                        "state": False
+                    }))))
+        else:
+            for client in self.clients:
+                tasks.append(asyncio.create_task(client.send(json.dumps({
+                    "action": "buffering",
+                    "state": False
+                }))))
+                tasks.append(asyncio.create_task(client.send(json.dumps({
+                    "action": "pause",
+                    "state": self.is_paused
+                }))))
+        if tasks:
+            await asyncio.wait(tasks)
 
     async def broadcast_user_count(self):
         if self.clients:
@@ -43,16 +78,34 @@ class SyncServer:
                 "action": "seek",
                 "position": self.current_time
             }))
-            await websocket.send(json.dumps({
-                "action": "pause",
-                "state": self.is_paused
-            }))
+            if self.buffering_clients:
+                await websocket.send(json.dumps({
+                    "action": "buffering",
+                    "state": True
+                }))
+                await websocket.send(json.dumps({
+                    "action": "pause",
+                    "state": True
+                }))
+            else:
+                await websocket.send(json.dumps({
+                    "action": "pause",
+                    "state": self.is_paused
+                }))
 
     async def unregister(self, websocket):
         self.clients.remove(websocket)
         self.client_times.pop(websocket, None)
+        was_buffering = websocket in self.buffering_clients
+        self.buffering_clients.discard(websocket)
         logging.info(f"Client disconnected. Total clients: {len(self.clients)}")
         await self.broadcast_user_count()
+
+        if was_buffering:
+            if not self.buffering_clients:
+                self.is_paused = False
+            await self.broadcast_buffering_state()
+            return
 
         self.is_paused = True
         if self.clients:
@@ -78,15 +131,35 @@ class SyncServer:
             
             if data.get("action") == "play":
                 self.current_url = data.get("url")
+                self.is_paused = False
                 self.client_times.clear()
+                self.buffering_clients.clear()
             elif data.get("action") == "playlist":
                 self.playlist = data.get("urls", [])
+            elif data.get("action") == "buffering":
+                state = bool(data.get("state", False))
+                self.client_times.clear()
+                if state:
+                    self.buffering_clients.add(sender_websocket)
+                else:
+                    self.buffering_clients.discard(sender_websocket)
+                    if not self.buffering_clients:
+                        self.is_paused = False
+                await self.broadcast_buffering_state()
+                return
             elif data.get("action") == "pause":
-                self.is_paused = data.get("state", True)
+                state = bool(data.get("state", True))
+                if self.buffering_clients:
+                    if not state:
+                        await sender_websocket.send(json.dumps({"action": "pause", "state": True}))
+                    return
+                self.is_paused = state
             elif data.get("action") == "seek":
                 self.current_time = data.get("position", 0.0)
                 self.client_times.clear()
             elif data.get("action") == "time_sync":
+                if self.buffering_clients:
+                    return
                 self.current_time = data.get("position", 0.0)
                 self.client_times[sender_websocket] = self.current_time
                 if self.client_times:

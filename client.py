@@ -140,6 +140,7 @@ class MpvSignals(QObject):
     duration_changed = pyqtSignal(float)
     cache_duration_changed = pyqtSignal(float)
     pause_changed = pyqtSignal(bool)
+    paused_for_cache_changed = pyqtSignal(bool)
     track_list_changed = pyqtSignal(list)
     mouse_moved = pyqtSignal()
     eof_reached = pyqtSignal()
@@ -336,6 +337,8 @@ class SyncPlayClient(QMainWindow):
 
         @self.player.event_callback('end_file')
         def on_end_file(event):
+            if getattr(self, '_local_buffering', False):
+                self.mpv_signals.paused_for_cache_changed.emit(False)
             if hasattr(event, 'event'):
                 data = event.event
                 if getattr(data, 'reason', None) == mpv.MpvEventEndFile.EOF:
@@ -410,6 +413,8 @@ class SyncPlayClient(QMainWindow):
         self._video_loading = False
         self._last_sync_time = 0.0
         self._is_live = False
+        self._local_buffering = False
+        self._remote_buffering = False
 
         self.is_host = False
 
@@ -429,6 +434,7 @@ class SyncPlayClient(QMainWindow):
         self.mpv_signals.duration_changed.connect(self.update_ui_duration)
         self.mpv_signals.cache_duration_changed.connect(self.update_ui_cache_duration)
         self.mpv_signals.pause_changed.connect(self.update_ui_pause)
+        self.mpv_signals.paused_for_cache_changed.connect(self.handle_local_buffering)
         self.mpv_signals.track_list_changed.connect(self.update_ui_tracks)
         self.mpv_signals.mouse_moved.connect(self.show_osc)
         self.mpv_signals.eof_reached.connect(self.play_next_item)
@@ -437,6 +443,7 @@ class SyncPlayClient(QMainWindow):
 
         # Bind MPV events
         self.player.observe_property('pause', self.on_mpv_pause)
+        self.player.observe_property('paused-for-cache', self.on_mpv_paused_for_cache)
         self.player.observe_property('time-pos', self.on_mpv_time_pos)
         self.player.observe_property('duration', self.on_mpv_duration)
         self.player.observe_property('demuxer-cache-duration', self.on_mpv_cache_duration)
@@ -545,6 +552,8 @@ class SyncPlayClient(QMainWindow):
         self.player.volume = value
 
     def toggle_playback(self):
+        if getattr(self, '_local_buffering', False) or getattr(self, '_remote_buffering', False):
+            return
         if self.player.pause is not None:
             self.player.pause = not self.player.pause
 
@@ -586,6 +595,12 @@ class SyncPlayClient(QMainWindow):
             self.lbl_cache.setText("Cache: 00:00")
 
     def update_ui_pause(self, is_paused):
+        if getattr(self, '_remote_buffering', False) and not is_paused:
+            if self.player.pause != True:
+                self.ignore_next_pause = True
+                self.player.pause = True
+            self.btn_play_pause.setText("Play")
+            return
         self.btn_play_pause.setText("Play" if is_paused else "Pause")
 
     def change_audio_track(self, index):
@@ -666,6 +681,8 @@ class SyncPlayClient(QMainWindow):
                         'state': getattr(self.player, 'pause', True)
                     })
         else:
+            self._local_buffering = False
+            self._remote_buffering = False
             self.btn_connect.setEnabled(True)
             self.btn_connect.setText("Connect")
             self.btn_connect.setStyleSheet("")
@@ -679,11 +696,25 @@ class SyncPlayClient(QMainWindow):
         if action == 'user_count':
             self.lbl_viewers.setText(f"Viewers: {data.get('count', 0)}")
             
+        elif action == 'buffering':
+            state = bool(data.get('state', False))
+            self._remote_buffering = state
+            if state:
+                if getattr(self, '_video_loading', False):
+                    pass
+                elif not getattr(self, '_local_buffering', False) and self.player.pause != True:
+                    self.ignore_next_pause = True
+                    self.player.pause = True
+
         elif action == 'pause':
             state = bool(data.get('state', True))
+            if getattr(self, '_remote_buffering', False) and not state:
+                return
             if getattr(self, '_video_loading', False):
                 if getattr(self, '_pending_pause', None) is not False or state is False:
                     self._pending_pause = state
+            elif getattr(self, '_local_buffering', False) and getattr(self, '_remote_buffering', False) and state:
+                pass
             elif self.player.pause != state:
                 self.ignore_next_pause = True
                 self.player.pause = state
@@ -724,12 +755,37 @@ class SyncPlayClient(QMainWindow):
                     self.file_list.setCurrentItem(items[0])
                 self._video_loading = True
                 self._is_live = False
+                self._local_buffering = False
+                self._remote_buffering = False
                 self.current_playing_url = url
+                if self.player.pause != True:
+                    self.ignore_next_pause = True
                 self.player.pause = True
                 self._pending_pause = False
                 self.player.command('stop')
                 self.player.play(url)
                 self._check_is_live(url)
+
+    def on_mpv_paused_for_cache(self, _name, value):
+        if value is not None:
+            self.mpv_signals.paused_for_cache_changed.emit(bool(value))
+
+    def handle_local_buffering(self, is_buffering):
+        is_buffering = bool(is_buffering)
+        if getattr(self, '_local_buffering', False) == is_buffering:
+            return
+        self._local_buffering = is_buffering
+
+        if not is_buffering and getattr(self, '_remote_buffering', False):
+            if self.player.pause != True:
+                self.ignore_next_pause = True
+                self.player.pause = True
+
+        if hasattr(self, 'ws_thread') and getattr(self.ws_thread, '_is_running', False):
+            self.ws_thread.send_message({
+                'action': 'buffering',
+                'state': is_buffering
+            })
 
     def on_mpv_pause(self, _name, value):
         if value is not None:
@@ -737,6 +793,12 @@ class SyncPlayClient(QMainWindow):
             
         if self.ignore_next_pause:
             self.ignore_next_pause = False
+            return
+
+        if getattr(self, '_remote_buffering', False) and value is False:
+            return
+
+        if getattr(self, '_local_buffering', False):
             return
         
         if value is not None:
@@ -748,9 +810,10 @@ class SyncPlayClient(QMainWindow):
 
     def apply_pending_pause(self):
         if getattr(self, '_pending_pause', None) is not None:
-            if self.player.pause != self._pending_pause:
+            target_pause = True if getattr(self, '_remote_buffering', False) else self._pending_pause
+            if self.player.pause != target_pause:
                 self.ignore_next_pause = True
-                self.player.pause = self._pending_pause
+                self.player.pause = target_pause
             self._pending_pause = None
 
     def on_mpv_duration(self, _name, value):
@@ -926,7 +989,11 @@ class SyncPlayClient(QMainWindow):
     def play_file(self, item):
         self._video_loading = True
         self._is_live = False
+        self._local_buffering = False
+        self._remote_buffering = False
         self.current_playing_url = item.text()
+        if self.player.pause != True:
+            self.ignore_next_pause = True
         self.player.pause = True
         self._pending_pause = False
         self.player.command('stop')
