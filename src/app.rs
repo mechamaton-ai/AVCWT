@@ -53,6 +53,8 @@ pub struct SyncPlayApp {
     last_pointer_pos: Option<Pos2>,
     volume_popup_open: bool,
     volume_indicator_until: Option<Instant>,
+    audio_menu_open: bool,
+    sub_menu_open: bool,
     settings_dialog_open: bool,
     edit_playlist_dialog_open: bool,
     edit_playlist_buffer: String,
@@ -131,6 +133,8 @@ impl SyncPlayApp {
             last_pointer_pos: None,
             volume_popup_open: false,
             volume_indicator_until: None,
+            audio_menu_open: false,
+            sub_menu_open: false,
             settings_dialog_open: false,
             edit_playlist_dialog_open: false,
             edit_playlist_buffer: String::new(),
@@ -857,8 +861,10 @@ impl SyncPlayApp {
                 }
 
                 // Scroll wheel over the player controls audio volume
-                let combo_open = ComboBox::is_open(ctx, Id::new("osc_audio_combo"))
-                    || ComboBox::is_open(ctx, Id::new("osc_subs_combo"));
+                let combo_open = self.audio_menu_open
+                    || self.sub_menu_open
+                    || self.volume_popup_open
+                    || ctx.memory(|m| m.any_popup_open());
                 if !self.settings_dialog_open
                     && !self.edit_playlist_dialog_open
                     && !combo_open
@@ -934,8 +940,9 @@ impl SyncPlayApp {
 
                 // Check 5-second OSC auto-hide timer
                 let popup_active = self.volume_popup_open
-                    || ComboBox::is_open(ctx, Id::new("osc_audio_combo"))
-                    || ComboBox::is_open(ctx, Id::new("osc_subs_combo"));
+                    || self.audio_menu_open
+                    || self.sub_menu_open
+                    || ctx.memory(|m| m.any_popup_open());
                 if popup_active {
                     self.last_mouse_activity = Instant::now();
                 } else if self.osc_visible
@@ -1106,7 +1113,7 @@ impl SyncPlayApp {
                                     .unwrap_or("None");
                                 let short_sub_label: String =
                                     current_sub_label.chars().take(3).collect();
-                                ComboBox::from_id_salt("osc_subs_combo")
+                                let sub_resp = ComboBox::from_id_salt("osc_subs_combo")
                                     .width(48.0)
                                     .selected_text(
                                         RichText::new(short_sub_label).color(Color32::WHITE),
@@ -1129,6 +1136,7 @@ impl SyncPlayApp {
                                             }
                                         }
                                     });
+                                self.sub_menu_open = sub_resp.inner.is_some();
                                 ui.label(RichText::new("Subs:").color(Color32::WHITE));
 
                                 // Audio track selector
@@ -1139,7 +1147,7 @@ impl SyncPlayApp {
                                     .unwrap_or("None");
                                 let short_audio_label: String =
                                     current_audio_label.chars().take(3).collect();
-                                ComboBox::from_id_salt("osc_audio_combo")
+                                let audio_resp = ComboBox::from_id_salt("osc_audio_combo")
                                     .width(48.0)
                                     .selected_text(
                                         RichText::new(short_audio_label).color(Color32::WHITE),
@@ -1162,6 +1170,7 @@ impl SyncPlayApp {
                                             }
                                         }
                                     });
+                                self.audio_menu_open = audio_resp.inner.is_some();
                                 ui.label(RichText::new("Audio:").color(Color32::WHITE));
 
                                 // Time label
