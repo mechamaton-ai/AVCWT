@@ -1051,53 +1051,169 @@ impl SyncPlayApp {
                     self.render_osc_overlays(ctx, video_rect);
                 }
 
-                // Render floating volume indicator when scrolling wheel
+                // Render floating volume indicator when scrolling wheel (vertical capsule on right edge)
                 if let Some(until) = self.volume_indicator_until {
                     if Instant::now() < until {
-                        let center = video_rect.center();
-                        let vol_indicator_pos = Pos2::new(center.x - 70.0, center.y - 30.0);
-                        let vol_bg = Color32::from_rgba_unmultiplied(20, 20, 24, 220);
-                        let vol_stroke = Stroke::new(
-                            1.0_f32,
-                            Color32::from_rgba_unmultiplied(90, 90, 96, 200),
-                        );
+                        let pill_w = 44.0;
+                        let pill_h = 160.0;
+                        let pill_x = (video_rect.right() - pill_w - 24.0).max(video_rect.left() + 10.0);
+                        let pill_y = video_rect.center().y - pill_h / 2.0;
+                        let pill_pos = Pos2::new(pill_x, pill_y);
+                        let pill_rect = Rect::from_min_size(pill_pos, Vec2::new(pill_w, pill_h));
 
                         egui::Area::new(Id::new("scroll_volume_indicator_overlay"))
                             .order(Order::Tooltip)
-                            .fixed_pos(vol_indicator_pos)
+                            .fixed_pos(pill_pos)
                             .show(ctx, |ui| {
-                                Frame::none()
-                                    .fill(vol_bg)
-                                    .stroke(vol_stroke)
-                                    .rounding(Rounding::same(10.0))
-                                    .inner_margin(Margin::symmetric(14.0, 10.0))
-                                    .show(ui, |ui| {
-                                        ui.set_width(112.0);
-                                        ui.horizontal(|ui| {
-                                            let icon = if self.volume <= 0.0 {
-                                                "🔇"
-                                            } else if self.volume < 50.0 {
-                                                "🔉"
-                                            } else {
-                                                "🔊"
-                                            };
-                                            ui.label(RichText::new(icon).size(16.0));
-                                            ui.label(
-                                                RichText::new(format!("{:.0}%", self.volume))
-                                                    .strong()
-                                                    .size(15.0)
-                                                    .color(Color32::WHITE),
-                                            );
-                                        });
-                                        ui.add_space(4.0);
-                                        let vol_fraction = (self.volume as f32 / 100.0).clamp(0.0, 1.0);
-                                        ui.add(
-                                            egui::ProgressBar::new(vol_fraction)
-                                                .desired_height(6.0)
-                                                .desired_width(112.0)
-                                                .fill(Color32::from_rgb(42, 130, 218)),
-                                        );
-                                    });
+                                let (_, resp) = ui.allocate_exact_size(
+                                    Vec2::new(pill_w, pill_h),
+                                    Sense::click_and_drag(),
+                                );
+
+                                if resp.clicked() || resp.dragged() {
+                                    if let Some(pos) = resp.interact_pointer_pos() {
+                                        let frac = ((pill_rect.bottom() - pos.y) / pill_rect.height()).clamp(0.0, 1.0);
+                                        self.last_mouse_activity = Instant::now();
+                                        self.change_volume((frac * 100.0) as f64);
+                                        self.volume_indicator_until = Some(Instant::now() + Duration::from_millis(1500));
+                                    }
+                                }
+
+                                let vol_frac = (self.volume / 100.0).clamp(0.0, 1.0) as f32;
+                                let r = pill_w / 2.0;
+
+                                // 1. Dark capsule background
+                                ui.painter().rect_filled(
+                                    pill_rect,
+                                    Rounding::same(r),
+                                    Color32::from_rgba_unmultiplied(22, 22, 26, 235),
+                                );
+
+                                // 2. Active blue fill from bottom up (clipped to capsule)
+                                if vol_frac > 0.0 {
+                                    let filled_h = pill_h * vol_frac;
+                                    let filled_rect = Rect::from_min_max(
+                                        Pos2::new(pill_rect.left(), pill_rect.bottom() - filled_h),
+                                        Pos2::new(pill_rect.right(), pill_rect.bottom()),
+                                    );
+                                    ui.painter().with_clip_rect(pill_rect).rect_filled(
+                                        filled_rect,
+                                        Rounding::ZERO,
+                                        Color32::from_rgb(42, 130, 218),
+                                    );
+                                }
+
+                                // 3. Capsule border stroke
+                                ui.painter().rect_stroke(
+                                    pill_rect,
+                                    Rounding::same(r),
+                                    Stroke::new(
+                                        1.0_f32,
+                                        Color32::from_rgba_unmultiplied(75, 75, 90, 200),
+                                    ),
+                                );
+
+                                // 4. Percentage text at top
+                                let text_pos = Pos2::new(pill_rect.center().x, pill_rect.top() + 22.0);
+                                ui.painter().text(
+                                    text_pos,
+                                    egui::Align2::CENTER_CENTER,
+                                    format!("{:.0}%", self.volume),
+                                    egui::FontId::proportional(13.5),
+                                    Color32::WHITE,
+                                );
+
+                                // 5. White vector speaker icon at bottom
+                                let vc = Pos2::new(pill_rect.center().x, pill_rect.bottom() - 26.0);
+                                let icon_color = Color32::WHITE;
+
+                                if self.volume <= 0.0 {
+                                    // Speaker body
+                                    ui.painter().rect_filled(
+                                        Rect::from_min_max(Pos2::new(vc.x - 7.0, vc.y - 3.2), Pos2::new(vc.x - 3.5, vc.y + 3.2)),
+                                        Rounding::ZERO,
+                                        icon_color,
+                                    );
+                                    ui.painter().add(Shape::convex_polygon(
+                                        vec![
+                                            Pos2::new(vc.x - 3.5, vc.y - 3.2),
+                                            Pos2::new(vc.x + 0.5, vc.y - 6.2),
+                                            Pos2::new(vc.x + 0.5, vc.y + 6.2),
+                                            Pos2::new(vc.x - 3.5, vc.y + 3.2),
+                                        ],
+                                        icon_color,
+                                        Stroke::NONE,
+                                    ));
+                                    // Diagonal mute cross ✕
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 3.5, vc.y - 3.5), Pos2::new(vc.x + 8.0, vc.y + 3.5)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 8.0, vc.y - 3.5), Pos2::new(vc.x + 3.5, vc.y + 3.5)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                } else if self.volume < 50.0 {
+                                    // Speaker body
+                                    ui.painter().rect_filled(
+                                        Rect::from_min_max(Pos2::new(vc.x - 6.5, vc.y - 3.2), Pos2::new(vc.x - 3.0, vc.y + 3.2)),
+                                        Rounding::ZERO,
+                                        icon_color,
+                                    );
+                                    ui.painter().add(Shape::convex_polygon(
+                                        vec![
+                                            Pos2::new(vc.x - 3.0, vc.y - 3.2),
+                                            Pos2::new(vc.x + 1.0, vc.y - 6.2),
+                                            Pos2::new(vc.x + 1.0, vc.y + 6.2),
+                                            Pos2::new(vc.x - 3.0, vc.y + 3.2),
+                                        ],
+                                        icon_color,
+                                        Stroke::NONE,
+                                    ));
+                                    // 1 sound wave arc
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 3.8, vc.y - 3.8), Pos2::new(vc.x + 5.5, vc.y)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 5.5, vc.y), Pos2::new(vc.x + 3.8, vc.y + 3.8)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                } else {
+                                    // Speaker body
+                                    ui.painter().rect_filled(
+                                        Rect::from_min_max(Pos2::new(vc.x - 7.5, vc.y - 3.2), Pos2::new(vc.x - 4.0, vc.y + 3.2)),
+                                        Rounding::ZERO,
+                                        icon_color,
+                                    );
+                                    ui.painter().add(Shape::convex_polygon(
+                                        vec![
+                                            Pos2::new(vc.x - 4.0, vc.y - 3.2),
+                                            Pos2::new(vc.x - 0.2, vc.y - 6.2),
+                                            Pos2::new(vc.x - 0.2, vc.y + 6.2),
+                                            Pos2::new(vc.x - 4.0, vc.y + 3.2),
+                                        ],
+                                        icon_color,
+                                        Stroke::NONE,
+                                    ));
+                                    // 2 sound wave arcs
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 2.6, vc.y - 3.5), Pos2::new(vc.x + 4.4, vc.y)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 4.4, vc.y), Pos2::new(vc.x + 2.6, vc.y + 3.5)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 5.8, vc.y - 5.8), Pos2::new(vc.x + 8.2, vc.y)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                    ui.painter().line_segment(
+                                        [Pos2::new(vc.x + 8.2, vc.y), Pos2::new(vc.x + 5.8, vc.y + 5.8)],
+                                        Stroke::new(1.6_f32, icon_color),
+                                    );
+                                }
                             });
                         ctx.request_repaint_after(Duration::from_millis(50));
                     } else {
