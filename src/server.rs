@@ -16,7 +16,7 @@ type ClientId = u64;
 type ClientSender = mpsc::UnboundedSender<String>;
 
 /// Shared state of the synchronization server, matching `SyncServer` in `server.py`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ServerState {
     pub clients: HashMap<ClientId, ClientSender>,
     pub current_url: Option<String>,
@@ -24,6 +24,12 @@ pub struct ServerState {
     pub current_time: f64,
     pub is_paused: bool,
     pub client_times: HashMap<ClientId, f64>,
+}
+
+impl Default for ServerState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ServerState {

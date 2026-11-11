@@ -500,9 +500,8 @@ impl SyncPlayApp {
             }
             SyncMessage::Pause { state } => {
                 if self.video_loading {
-                    if self.pending_pause != Some(false) || !state {
-                        self.pending_pause = Some(state);
-                    }
+                    self.pending_pause = Some(state);
+                    self.is_paused = state;
                 } else if self.is_paused != state {
                     self.ignore_next_pause = true;
                     self.is_paused = state;
@@ -549,6 +548,9 @@ impl SyncPlayApp {
     }
 
     fn on_mpv_pause(&mut self, value: bool) {
+        if self.video_loading {
+            return;
+        }
         self.is_paused = value;
         if self.ignore_next_pause {
             self.ignore_next_pause = false;
@@ -577,18 +579,21 @@ impl SyncPlayApp {
                 self.last_time_pos = Some(self.current_time);
                 self.last_sync_time = self.current_time;
             }
-            self.pending_pause_apply_at = Some(Instant::now() + Duration::from_millis(300));
+            if self.pending_pause == Some(true) {
+                self.pending_pause_apply_at = None;
+                self.apply_pending_pause();
+            } else {
+                self.pending_pause_apply_at = Some(Instant::now() + Duration::from_millis(300));
+            }
         }
     }
 
     fn apply_pending_pause(&mut self) {
         if let Some(target_pause) = self.pending_pause.take() {
-            if self.is_paused != target_pause {
-                self.ignore_next_pause = true;
-                self.is_paused = target_pause;
-                if let Some(ref mut player) = self.player {
-                    player.set_pause(target_pause);
-                }
+            self.ignore_next_pause = true;
+            self.is_paused = target_pause;
+            if let Some(ref mut player) = self.player {
+                player.set_pause(target_pause);
             }
         }
     }
@@ -1472,6 +1477,19 @@ mod tests {
         app.handle_network_message(SyncMessage::Pause { state: false });
         assert_eq!(app.pending_seek, Some(33.5));
         assert_eq!(app.pending_pause, Some(false));
+
+        // When host sends pause: true while client is loading (e.g. joining a paused host),
+        // pending_pause must update to true and prevent auto-playing upon complete_video_loading
+        app.handle_network_message(SyncMessage::Pause { state: true });
+        assert_eq!(app.pending_pause, Some(true));
+        assert!(app.is_paused);
+
+        app.complete_video_loading();
+        assert!(!app.video_loading);
+        assert_eq!(app.current_time, 33.5);
+        assert!(app.is_paused);
+        assert_eq!(app.pending_pause, None);
+        assert_eq!(app.pending_pause_apply_at, None);
     }
 
     #[test]
