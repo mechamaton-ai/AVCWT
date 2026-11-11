@@ -1023,12 +1023,13 @@ impl SyncPlayApp {
                                     .sub_tracks
                                     .get(self.selected_sub_idx)
                                     .map(|(_, l)| l.as_str())
-                                    .unwrap_or("None")
-                                    .to_string();
+                                    .unwrap_or("None");
+                                let short_sub_label: String =
+                                    current_sub_label.chars().take(3).collect();
                                 ComboBox::from_id_salt("osc_subs_combo")
-                                    .width(64.0)
+                                    .width(48.0)
                                     .selected_text(
-                                        RichText::new(current_sub_label).color(Color32::WHITE),
+                                        RichText::new(short_sub_label).color(Color32::WHITE),
                                     )
                                     .show_ui(ui, |ui| {
                                         for (idx, (track_id, label)) in
@@ -1055,12 +1056,13 @@ impl SyncPlayApp {
                                     .audio_tracks
                                     .get(self.selected_audio_idx)
                                     .map(|(_, l)| l.as_str())
-                                    .unwrap_or("None")
-                                    .to_string();
+                                    .unwrap_or("None");
+                                let short_audio_label: String =
+                                    current_audio_label.chars().take(3).collect();
                                 ComboBox::from_id_salt("osc_audio_combo")
-                                    .width(64.0)
+                                    .width(48.0)
                                     .selected_text(
-                                        RichText::new(current_audio_label).color(Color32::WHITE),
+                                        RichText::new(short_audio_label).color(Color32::WHITE),
                                     )
                                     .show_ui(ui, |ui| {
                                         for (idx, (track_id, label)) in
