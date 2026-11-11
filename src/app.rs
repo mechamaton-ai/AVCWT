@@ -1460,21 +1460,21 @@ impl SyncPlayApp {
                                             Pos2::new(bl + 14.5, bt + 25.5),
                                             Pos2::new(bl + 14.5, bt + 12.0),
                                         ],
-                                        Stroke::new(2.2, Color32::WHITE),
+                                        Stroke::new(2.2_f32, Color32::WHITE),
                                     );
                                     ui.painter().line_segment(
                                         [
                                             Pos2::new(bl + 27.0, bt + 21.5),
                                             Pos2::new(bl + 27.0, bt + 8.0),
                                         ],
-                                        Stroke::new(2.2, Color32::WHITE),
+                                        Stroke::new(2.2_f32, Color32::WHITE),
                                     );
                                     ui.painter().line_segment(
                                         [
                                             Pos2::new(bl + 13.5, bt + 13.0),
                                             Pos2::new(bl + 28.0, bt + 9.0),
                                         ],
-                                        Stroke::new(3.2, Color32::WHITE),
+                                        Stroke::new(3.2_f32, Color32::WHITE),
                                     );
 
                                     ui.add_space(8.0);
@@ -1533,7 +1533,7 @@ impl SyncPlayApp {
                                             Pos2::new(pc.x - 6.0, pc.y - 5.5),
                                             Pos2::new(pc.x - 6.0, pc.y + 5.5),
                                         ],
-                                        Stroke::new(2.2, p_color),
+                                        Stroke::new(2.2_f32, p_color),
                                     );
                                     ui.painter().add(Shape::convex_polygon(
                                         vec![
@@ -1647,7 +1647,7 @@ impl SyncPlayApp {
                                             Pos2::new(nc.x + 6.0, nc.y - 5.5),
                                             Pos2::new(nc.x + 6.0, nc.y + 5.5),
                                         ],
-                                        Stroke::new(2.2, n_color),
+                                        Stroke::new(2.2_f32, n_color),
                                     );
                                     if next_resp.clicked() {
                                         self.play_next_item();
@@ -1668,7 +1668,7 @@ impl SyncPlayApp {
                                     )
                                     .fill(Color32::from_rgba_unmultiplied(36, 36, 44, 180))
                                     .stroke(Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         Color32::from_rgba_unmultiplied(70, 70, 80, 150),
                                     ))
                                     .rounding(Rounding::same(8.0));
@@ -1701,7 +1701,7 @@ impl SyncPlayApp {
                                         pl_rect,
                                         Rounding::same(15.0),
                                         Stroke::new(
-                                            1.0,
+                                            1.0_f32,
                                             Color32::from_rgba_unmultiplied(85, 80, 120, 180),
                                         ),
                                     );
@@ -1747,7 +1747,7 @@ impl SyncPlayApp {
                                     )
                                     .fill(Color32::from_rgba_unmultiplied(36, 36, 44, 180))
                                     .stroke(Stroke::new(
-                                        1.0,
+                                        1.0_f32,
                                         Color32::from_rgba_unmultiplied(70, 70, 80, 150),
                                     ))
                                     .rounding(Rounding::same(8.0));
@@ -1783,7 +1783,7 @@ impl SyncPlayApp {
                                         as_rect,
                                         Rounding::same(15.0),
                                         Stroke::new(
-                                            1.0,
+                                            1.0_f32,
                                             Color32::from_rgba_unmultiplied(75, 75, 88, 180),
                                         ),
                                     );
@@ -1844,7 +1844,7 @@ impl SyncPlayApp {
                         Frame::none()
                             .fill(Color32::from_rgba_unmultiplied(22, 22, 28, 245))
                             .stroke(Stroke::new(
-                                1.0,
+                                1.0_f32,
                                 Color32::from_rgba_unmultiplied(80, 80, 95, 200),
                             ))
                             .rounding(Rounding::same(12.0))
@@ -1967,7 +1967,7 @@ impl SyncPlayApp {
                         Frame::none()
                             .fill(Color32::from_rgba_unmultiplied(22, 22, 28, 245))
                             .stroke(Stroke::new(
-                                1.0,
+                                1.0_f32,
                                 Color32::from_rgba_unmultiplied(80, 80, 95, 200),
                             ))
                             .rounding(Rounding::same(10.0))
