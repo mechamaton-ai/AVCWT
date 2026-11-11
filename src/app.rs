@@ -2,9 +2,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use egui::{
-    Align, Color32, ComboBox, Context, Frame, Id, Key, Layout, Margin, Order, Pos2, Rect,
-    RichText, Rounding, Sense, Slider, Stroke, SystemTheme, TextureHandle, TextureOptions, Theme,
-    ThemePreference, Vec2, ViewportCommand,
+    Align, Color32, Context, CursorIcon, Frame, Id, Key, Layout, Margin, Order, Pos2, Rect,
+    RichText, Rounding, Sense, Shape, Slider, Stroke, SystemTheme, TextureHandle, TextureOptions,
+    Theme, ThemePreference, UiBuilder, Vec2, ViewportCommand,
 };
 use log::{info, warn};
 
@@ -53,6 +53,7 @@ pub struct SyncPlayApp {
     last_pointer_pos: Option<Pos2>,
     volume_popup_open: bool,
     volume_indicator_until: Option<Instant>,
+    audio_sub_popup_open: bool,
     audio_menu_open: bool,
     sub_menu_open: bool,
     settings_dialog_open: bool,
@@ -135,6 +136,7 @@ impl SyncPlayApp {
             last_pointer_pos: None,
             volume_popup_open: false,
             volume_indicator_until: None,
+            audio_sub_popup_open: false,
             audio_menu_open: false,
             sub_menu_open: false,
             settings_dialog_open: false,
@@ -254,6 +256,13 @@ impl SyncPlayApp {
                 player.set_time_pos(new_pos);
             } else {
                 self.on_mpv_time_pos(new_pos);
+            }
+        } else {
+            self.current_time = 0.0;
+            if let Some(ref mut player) = self.player {
+                player.set_time_pos(0.0);
+            } else {
+                self.on_mpv_time_pos(0.0);
             }
         }
     }
@@ -386,8 +395,47 @@ impl SyncPlayApp {
         }
     }
 
+    pub fn play_prev_item(&mut self) {
+        if self.current_time > 3.0 {
+            self.seek_video(0.0);
+            return;
+        }
+
+        let Some(ref current_url) = self.current_playing_url else {
+            if !self.playlist.is_empty() {
+                let url = self.playlist[0].clone();
+                self.selected_playlist_idx = Some(0);
+                self.play_url(url, true);
+            }
+            return;
+        };
+
+        let current_row = match self.selected_playlist_idx {
+            Some(idx) if self.playlist.get(idx) == Some(current_url) => Some(idx),
+            _ => self.playlist.iter().position(|u| u == current_url),
+        };
+
+        if let Some(row) = current_row {
+            if row > 0 {
+                let prev_idx = row - 1;
+                let prev_url = self.playlist[prev_idx].clone();
+                self.selected_playlist_idx = Some(prev_idx);
+                self.play_url(prev_url, true);
+            } else {
+                self.seek_video(0.0);
+            }
+        } else {
+            self.seek_video(0.0);
+        }
+    }
+
     pub fn play_next_item(&mut self) {
         let Some(ref current_url) = self.current_playing_url else {
+            if !self.playlist.is_empty() {
+                let url = self.playlist[0].clone();
+                self.selected_playlist_idx = Some(0);
+                self.play_url(url, true);
+            }
             return;
         };
 
@@ -899,6 +947,7 @@ impl SyncPlayApp {
                 // Scroll wheel over the player controls audio volume
                 let combo_open = self.audio_menu_open
                     || self.sub_menu_open
+                    || self.audio_sub_popup_open
                     || self.volume_popup_open
                     || ctx.memory(|m| m.any_popup_open());
                 if !self.settings_dialog_open
@@ -976,6 +1025,7 @@ impl SyncPlayApp {
 
                 // Check 5-second OSC auto-hide timer
                 let popup_active = self.volume_popup_open
+                    || self.audio_sub_popup_open
                     || self.audio_menu_open
                     || self.sub_menu_open
                     || ctx.memory(|m| m.any_popup_open());
@@ -1047,14 +1097,107 @@ impl SyncPlayApp {
             });
     }
 
+    fn get_media_display_info(&self) -> (String, String) {
+        if let Some(ref url) = self.current_playing_url {
+            let raw_name = url.rsplit('/').next().unwrap_or(url);
+            let raw_name = raw_name.rsplit('\\').next().unwrap_or(raw_name);
+            let name_without_query = raw_name.split('?').next().unwrap_or(raw_name);
+            let unescaped = name_without_query
+                .replace("%20", " ")
+                .replace("%28", "(")
+                .replace("%29", ")")
+                .replace("%5B", "[")
+                .replace("%5D", "]");
+            let display_title = if let Some(dot_idx) = unescaped.rfind('.') {
+                unescaped[..dot_idx].to_string()
+            } else {
+                unescaped
+            };
+
+            let track_idx = match self.selected_playlist_idx {
+                Some(idx) => idx + 1,
+                None => self
+                    .playlist
+                    .iter()
+                    .position(|u| u == url)
+                    .map(|i| i + 1)
+                    .unwrap_or(1),
+            };
+            let total_tracks = self.playlist.len().max(1);
+
+            let ep_part = if let Some(idx) = display_title.to_lowercase().find("episode") {
+                let rest = &display_title[idx..];
+                let tokens: Vec<&str> = rest.split_whitespace().take(2).collect();
+                format!("{} • ", tokens.join(" "))
+            } else if let Some(idx) = display_title.to_lowercase().find("ep.") {
+                let rest = &display_title[idx..];
+                let tokens: Vec<&str> = rest.split_whitespace().take(2).collect();
+                format!("{} • ", tokens.join(" "))
+            } else if let Some(idx) = display_title.to_lowercase().find("ep ") {
+                let rest = &display_title[idx..];
+                let tokens: Vec<&str> = rest.split_whitespace().take(2).collect();
+                format!("{} • ", tokens.join(" "))
+            } else {
+                String::new()
+            };
+
+            let subtitle = format!("{ep_part}Track {track_idx} of {total_tracks}");
+            (display_title, subtitle)
+        } else {
+            (
+                "Synthwave Horizon".to_string(),
+                "Episode 01 • Track 1 of 4".to_string(),
+            )
+        }
+    }
+
+    fn get_audio_sub_pill_label(&self) -> String {
+        let audio_label = self
+            .audio_tracks
+            .get(self.selected_audio_idx)
+            .map(|(_, l)| l.as_str())
+            .unwrap_or("ENG");
+        let sub_label = self
+            .sub_tracks
+            .get(self.selected_sub_idx)
+            .map(|(_, l)| l.as_str())
+            .unwrap_or("CC");
+
+        let short_audio = if audio_label.to_lowercase().contains("eng") {
+            "ENG".to_string()
+        } else if audio_label.to_lowercase().contains("jpn")
+            || audio_label.to_lowercase().contains("jap")
+        {
+            "JPN".to_string()
+        } else if audio_label.eq_ignore_ascii_case("none") {
+            "ENG".to_string()
+        } else if audio_label.len() > 3 {
+            audio_label.chars().take(3).collect::<String>().to_uppercase()
+        } else {
+            audio_label.to_uppercase()
+        };
+
+        let short_sub = if sub_label.to_lowercase().contains("none") {
+            "CC".to_string()
+        } else if sub_label.to_lowercase().contains("eng") {
+            "CC".to_string()
+        } else if sub_label.len() > 3 {
+            sub_label.chars().take(3).collect::<String>().to_uppercase()
+        } else {
+            sub_label.to_uppercase()
+        };
+
+        format!("{short_audio} / {short_sub}")
+    }
+
     fn render_osc_overlays(&mut self, ctx: &Context, video_rect: Rect) {
         let margin = 20.0;
         let osc_width = (video_rect.width() - margin * 2.0).max(120.0);
         let inner_osc_width = (osc_width - 24.0).max(96.0);
-        let osc_bg = Color32::from_rgba_unmultiplied(30, 30, 30, 200);
+        let osc_bg = Color32::from_rgba_unmultiplied(18, 18, 22, 240);
         let osc_stroke = Stroke::new(
             1.0_f32,
-            Color32::from_rgba_unmultiplied(80, 80, 86, 180),
+            Color32::from_rgba_unmultiplied(65, 65, 78, 180),
         );
 
         // Top OSC Bar: Cache duration display
@@ -1100,13 +1243,14 @@ impl SyncPlayApp {
                     });
             });
 
-        // Bottom OSC Bar: Playback controls, seekbar, track selectors, volume, sidebar, fullscreen
-        let bottom_h = 54.0;
+        // Bottom OSC Bar: Modern Media Player Rework (Two-row layout)
+        let bottom_h = 92.0;
         let bottom_pos = Pos2::new(
             video_rect.left() + margin,
             (video_rect.bottom() - bottom_h - margin).max(video_rect.top() + margin),
         );
         let mut volume_btn_rect = None;
+        let mut audio_sub_btn_rect = None;
 
         egui::Area::new(Id::new("bottom_osc_overlay"))
             .order(Order::Middle)
@@ -1115,148 +1259,702 @@ impl SyncPlayApp {
                 Frame::none()
                     .fill(osc_bg)
                     .stroke(osc_stroke)
-                    .rounding(Rounding::same(15.0))
-                    .inner_margin(Margin::symmetric(12.0, 10.0))
+                    .rounding(Rounding::same(18.0))
+                    .inner_margin(Margin::symmetric(16.0, 10.0))
                     .show(ui, |ui| {
                         ui.set_min_width(inner_osc_width);
                         ui.set_max_width(inner_osc_width);
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        ui.horizontal(|ui| {
-                            let osc_btn = |label: &str| {
-                                egui::Button::new(
-                                    RichText::new(label).strong().color(Color32::WHITE),
-                                )
-                                .fill(Color32::from_rgba_unmultiplied(62, 62, 68, 220))
-                                .stroke(Stroke::new(
-                                    1.0_f32,
-                                    Color32::from_rgba_unmultiplied(105, 105, 112, 180),
-                                ))
-                                .rounding(Rounding::same(6.0))
-                            };
+                        ui.vertical(|ui| {
+                            // -------------------------------------------------------------
+                            // ROW 1: Progress / Seek Bar with Time Labels
+                            // -------------------------------------------------------------
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 10.0;
 
-                            // Play / Pause button on the left
-                            let play_label = if self.is_paused { "Play" } else { "Pause" };
-                            if ui.add_sized([50.0, 26.0], osc_btn(play_label)).clicked() {
-                                self.toggle_playback();
-                            }
+                                let cur_time_str = format_time(Some(self.current_time));
+                                let dur_time_str = format_time(Some(self.current_duration));
 
-                            // Lay out right-side controls from right to left, then fill the exact remaining space with the seek slider
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                // Fullscreen button
-                                if ui.add_sized([26.0, 26.0], osc_btn("⛶")).clicked() {
-                                    self.toggle_fullscreen(ctx);
-                                }
-
-                                // Toggle Sidebar button
-                                if ui.add_sized([26.0, 26.0], osc_btn("☰")).clicked() {
-                                    self.toggle_sidebar();
-                                }
-
-                                // Volume button
-                                let vol_resp = ui.add_sized([26.0, 26.0], osc_btn("🔊"));
-                                volume_btn_rect = Some(vol_resp.rect);
-                                if vol_resp.clicked() {
-                                    self.volume_popup_open = !self.volume_popup_open;
-                                }
-
-                                // Subtitle track selector
-                                let current_sub_label = self
-                                    .sub_tracks
-                                    .get(self.selected_sub_idx)
-                                    .map(|(_, l)| l.as_str())
-                                    .unwrap_or("None");
-                                let short_sub_label: String =
-                                    current_sub_label.chars().take(3).collect();
-                                let sub_resp = ComboBox::from_id_salt("osc_subs_combo")
-                                    .width(48.0)
-                                    .selected_text(
-                                        RichText::new(short_sub_label).color(Color32::WHITE),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (idx, (track_id, label)) in
-                                            self.sub_tracks.iter().enumerate()
-                                        {
-                                            if ui
-                                                .selectable_value(
-                                                    &mut self.selected_sub_idx,
-                                                    idx,
-                                                    label,
-                                                )
-                                                .changed()
-                                            {
-                                                if let Some(ref player) = self.player {
-                                                    player.set_subtitle_track(*track_id);
-                                                }
-                                            }
-                                        }
-                                    });
-                                self.sub_menu_open = sub_resp.inner.is_some();
-                                ui.label(RichText::new("Subs:").color(Color32::WHITE));
-
-                                // Audio track selector
-                                let current_audio_label = self
-                                    .audio_tracks
-                                    .get(self.selected_audio_idx)
-                                    .map(|(_, l)| l.as_str())
-                                    .unwrap_or("None");
-                                let short_audio_label: String =
-                                    current_audio_label.chars().take(3).collect();
-                                let audio_resp = ComboBox::from_id_salt("osc_audio_combo")
-                                    .width(48.0)
-                                    .selected_text(
-                                        RichText::new(short_audio_label).color(Color32::WHITE),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (idx, (track_id, label)) in
-                                            self.audio_tracks.iter().enumerate()
-                                        {
-                                            if ui
-                                                .selectable_value(
-                                                    &mut self.selected_audio_idx,
-                                                    idx,
-                                                    label,
-                                                )
-                                                .changed()
-                                            {
-                                                if let Some(ref player) = self.player {
-                                                    player.set_audio_track(*track_id);
-                                                }
-                                            }
-                                        }
-                                    });
-                                self.audio_menu_open = audio_resp.inner.is_some();
-                                ui.label(RichText::new("Audio:").color(Color32::WHITE));
-
-                                // Time label
-                                let time_str = format!(
-                                    "{} / {}",
-                                    format_time(Some(self.current_time)),
-                                    format_time(Some(self.current_duration))
+                                ui.label(
+                                    RichText::new(cur_time_str)
+                                        .size(13.0)
+                                        .monospace()
+                                        .color(Color32::from_rgb(215, 215, 225)),
                                 );
-                                ui.label(RichText::new(time_str).color(Color32::WHITE));
 
-                                // Seek slider takes the exact remaining space between Play and Time label
-                                let mut slider_val = if self.current_duration > 0.0 {
-                                    ((self.current_time / self.current_duration) * 1000.0)
-                                        .clamp(0.0, 1000.0)
-                                } else {
-                                    0.0
-                                };
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(
+                                        RichText::new(dur_time_str)
+                                            .size(13.0)
+                                            .monospace()
+                                            .color(Color32::from_rgb(215, 215, 225)),
+                                    );
 
-                                let slider_width = (ui.available_width() - 14.0).max(20.0);
-                                ui.spacing_mut().slider_width = slider_width;
-                                let slider_resp = ui.add_enabled(
-                                    self.current_duration > 0.0,
-                                    Slider::new(&mut slider_val, 0.0..=1000.0).show_value(false),
-                                );
-                                if slider_resp.dragged() || slider_resp.changed() {
-                                    self.last_mouse_activity = Instant::now();
-                                    self.seek_video(slider_val);
-                                }
+                                    let seek_bar_w = (ui.available_width() - 8.0).max(20.0);
+                                    let (seek_rect, seek_resp) = ui.allocate_exact_size(
+                                        Vec2::new(seek_bar_w, 18.0),
+                                        Sense::click_and_drag(),
+                                    );
+
+                                    if seek_resp.hovered() {
+                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                    }
+
+                                    let center_y = seek_rect.center().y;
+                                    let bar_h = 6.0;
+                                    let track_rect = Rect::from_min_max(
+                                        Pos2::new(seek_rect.left(), center_y - bar_h / 2.0),
+                                        Pos2::new(seek_rect.right(), center_y + bar_h / 2.0),
+                                    );
+                                    ui.painter().rect_filled(
+                                        track_rect,
+                                        Rounding::same(3.0),
+                                        Color32::from_rgb(46, 46, 54),
+                                    );
+
+                                    let has_duration = self.current_duration > 0.0;
+                                    let progress_frac = if has_duration {
+                                        (self.current_time / self.current_duration)
+                                            .clamp(0.0, 1.0)
+                                            as f32
+                                    } else {
+                                        0.0
+                                    };
+
+                                    let buffer_frac = if has_duration && self.cache_duration > 0.0 {
+                                        ((self.current_time + self.cache_duration)
+                                            / self.current_duration)
+                                            .clamp(0.0, 1.0)
+                                            as f32
+                                    } else {
+                                        progress_frac
+                                    };
+
+                                    if buffer_frac > progress_frac {
+                                        let buf_left =
+                                            seek_rect.left() + progress_frac * seek_rect.width();
+                                        let buf_right =
+                                            seek_rect.left() + buffer_frac * seek_rect.width();
+                                        let buf_rect = Rect::from_min_max(
+                                            Pos2::new(buf_left, center_y - bar_h / 2.0),
+                                            Pos2::new(buf_right, center_y + bar_h / 2.0),
+                                        );
+                                        ui.painter().rect_filled(
+                                            buf_rect,
+                                            Rounding::ZERO,
+                                            Color32::from_rgb(72, 72, 84),
+                                        );
+                                    }
+
+                                    if progress_frac > 0.0 {
+                                        let played_right =
+                                            seek_rect.left() + progress_frac * seek_rect.width();
+                                        let played_rect = Rect::from_min_max(
+                                            Pos2::new(seek_rect.left(), center_y - bar_h / 2.0),
+                                            Pos2::new(played_right, center_y + bar_h / 2.0),
+                                        );
+                                        ui.painter().rect_filled(
+                                            played_rect,
+                                            Rounding::same(3.0),
+                                            Color32::from_rgb(109, 94, 252),
+                                        );
+                                    }
+
+                                    let thumb_x =
+                                        seek_rect.left() + progress_frac * seek_rect.width();
+                                    let thumb_r = if seek_resp.hovered() || seek_resp.dragged() {
+                                        8.0
+                                    } else {
+                                        7.0
+                                    };
+                                    ui.painter().circle_filled(
+                                        Pos2::new(thumb_x, center_y),
+                                        thumb_r + 2.0,
+                                        Color32::from_rgba_unmultiplied(0, 0, 0, 80),
+                                    );
+                                    ui.painter().circle_filled(
+                                        Pos2::new(thumb_x, center_y),
+                                        thumb_r,
+                                        Color32::WHITE,
+                                    );
+
+                                    if (seek_resp.clicked() || seek_resp.dragged()) && has_duration
+                                    {
+                                        if let Some(pos) = seek_resp.interact_pointer_pos() {
+                                            let frac = ((pos.x - seek_rect.left())
+                                                / seek_rect.width())
+                                                .clamp(0.0, 1.0);
+                                            self.last_mouse_activity = Instant::now();
+                                            self.seek_video((frac as f64) * 1000.0);
+                                        }
+                                    }
+                                });
+                            });
+
+                            ui.add_space(4.0);
+
+                            // -------------------------------------------------------------
+                            // ROW 2: Left Info, Centered Transport Controls, Right Actions
+                            // -------------------------------------------------------------
+                            let row_h = 44.0;
+                            let (row_rect, _) = ui.allocate_exact_size(
+                                Vec2::new(ui.available_width(), row_h),
+                                Sense::hover(),
+                            );
+
+                            let center_w = 126.0;
+                            let right_w = 266.0;
+                            let center_x = row_rect.center().x;
+                            let right_left = (row_rect.right() - right_w)
+                                .max(row_rect.left() + 200.0);
+                            let right_rect = Rect::from_min_max(
+                                Pos2::new(right_left, row_rect.top()),
+                                Pos2::new(row_rect.right(), row_rect.bottom()),
+                            );
+
+                            let ideal_center_left = center_x - center_w / 2.0;
+                            let center_left = ideal_center_left.clamp(
+                                row_rect.left() + 110.0,
+                                (right_left - center_w - 4.0).max(row_rect.left() + 110.0),
+                            );
+                            let center_rect = Rect::from_min_max(
+                                Pos2::new(center_left, row_rect.top()),
+                                Pos2::new(center_left + center_w, row_rect.bottom()),
+                            );
+
+                            let left_rect = Rect::from_min_max(
+                                Pos2::new(row_rect.left(), row_rect.top()),
+                                Pos2::new(
+                                    (center_left - 8.0).max(row_rect.left()),
+                                    row_rect.bottom(),
+                                ),
+                            );
+
+                            // SECTION 1: Left Track Information
+                            ui.allocate_new_ui(UiBuilder::new().max_rect(left_rect), |ui| {
+                                ui.horizontal_centered(|ui| {
+                                    // 38x38 Artwork container with vector musical note ♫
+                                    let (art_rect, _) = ui.allocate_exact_size(
+                                        Vec2::splat(38.0),
+                                        Sense::hover(),
+                                    );
+                                    ui.painter().rect_filled(
+                                        art_rect,
+                                        Rounding::same(9.0),
+                                        Color32::from_rgb(112, 88, 252),
+                                    );
+
+                                    let bl = art_rect.left();
+                                    let bt = art_rect.top();
+                                    ui.painter().circle_filled(
+                                        Pos2::new(bl + 12.0, bt + 25.5),
+                                        3.0,
+                                        Color32::WHITE,
+                                    );
+                                    ui.painter().circle_filled(
+                                        Pos2::new(bl + 24.5, bt + 21.5),
+                                        3.0,
+                                        Color32::WHITE,
+                                    );
+                                    ui.painter().line_segment(
+                                        [
+                                            Pos2::new(bl + 14.5, bt + 25.5),
+                                            Pos2::new(bl + 14.5, bt + 12.0),
+                                        ],
+                                        Stroke::new(2.2, Color32::WHITE),
+                                    );
+                                    ui.painter().line_segment(
+                                        [
+                                            Pos2::new(bl + 27.0, bt + 21.5),
+                                            Pos2::new(bl + 27.0, bt + 8.0),
+                                        ],
+                                        Stroke::new(2.2, Color32::WHITE),
+                                    );
+                                    ui.painter().line_segment(
+                                        [
+                                            Pos2::new(bl + 13.5, bt + 13.0),
+                                            Pos2::new(bl + 28.0, bt + 9.0),
+                                        ],
+                                        Stroke::new(3.2, Color32::WHITE),
+                                    );
+
+                                    ui.add_space(8.0);
+
+                                    // Title & Subtitle vertical column
+                                    ui.vertical(|ui| {
+                                        ui.set_max_width((left_rect.width() - 50.0).max(10.0));
+                                        let (title, subtitle) = self.get_media_display_info();
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(title)
+                                                    .strong()
+                                                    .size(13.5)
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .truncate(),
+                                        );
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(subtitle)
+                                                    .size(11.0)
+                                                    .color(Color32::from_rgb(156, 163, 175)),
+                                            )
+                                            .truncate(),
+                                        );
+                                    });
+                                });
+                            });
+
+                            // SECTION 2: Center Transport Controls (Prev, Big Play/Pause, Next)
+                            ui.allocate_new_ui(UiBuilder::new().max_rect(center_rect), |ui| {
+                                ui.horizontal_centered(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 10.0;
+
+                                    // Previous button: |◀
+                                    let (prev_rect, prev_resp) = ui.allocate_exact_size(
+                                        Vec2::splat(28.0),
+                                        Sense::click(),
+                                    );
+                                    if prev_resp.hovered() {
+                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                        ui.painter().circle_filled(
+                                            prev_rect.center(),
+                                            14.0,
+                                            Color32::from_rgba_unmultiplied(255, 255, 255, 25),
+                                        );
+                                    }
+                                    let p_color = if prev_resp.hovered() {
+                                        Color32::WHITE
+                                    } else {
+                                        Color32::from_rgb(205, 205, 215)
+                                    };
+                                    let pc = prev_rect.center();
+                                    ui.painter().line_segment(
+                                        [
+                                            Pos2::new(pc.x - 6.0, pc.y - 5.5),
+                                            Pos2::new(pc.x - 6.0, pc.y + 5.5),
+                                        ],
+                                        Stroke::new(2.2, p_color),
+                                    );
+                                    ui.painter().add(Shape::convex_polygon(
+                                        vec![
+                                            Pos2::new(pc.x + 5.0, pc.y - 5.5),
+                                            Pos2::new(pc.x + 5.0, pc.y + 5.5),
+                                            Pos2::new(pc.x - 4.5, pc.y),
+                                        ],
+                                        p_color,
+                                        Stroke::NONE,
+                                    ));
+                                    if prev_resp.clicked() {
+                                        self.play_prev_item();
+                                    }
+
+                                    // Big circular Play / Pause button (42x42)
+                                    let (play_rect, play_resp) = ui.allocate_exact_size(
+                                        Vec2::splat(42.0),
+                                        Sense::click(),
+                                    );
+                                    if play_resp.hovered() {
+                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                    }
+                                    let play_center = play_rect.center();
+                                    // Purple glow
+                                    ui.painter().circle_filled(
+                                        play_center,
+                                        24.0,
+                                        Color32::from_rgba_unmultiplied(93, 75, 246, 50),
+                                    );
+                                    let btn_color = if play_resp.hovered() {
+                                        Color32::from_rgb(115, 98, 255)
+                                    } else {
+                                        Color32::from_rgb(93, 75, 246)
+                                    };
+                                    ui.painter().circle_filled(play_center, 21.0, btn_color);
+
+                                    if self.is_paused {
+                                        // Play triangle ▶
+                                        ui.painter().add(Shape::convex_polygon(
+                                            vec![
+                                                Pos2::new(
+                                                    play_center.x - 4.5,
+                                                    play_center.y - 7.5,
+                                                ),
+                                                Pos2::new(
+                                                    play_center.x - 4.5,
+                                                    play_center.y + 7.5,
+                                                ),
+                                                Pos2::new(play_center.x + 6.5, play_center.y),
+                                            ],
+                                            Color32::WHITE,
+                                            Stroke::NONE,
+                                        ));
+                                    } else {
+                                        // Pause bars ❚❚
+                                        let bar_w = 3.2;
+                                        let bar_h = 13.0;
+                                        let bar1 = Rect::from_center_size(
+                                            Pos2::new(play_center.x - 3.8, play_center.y),
+                                            Vec2::new(bar_w, bar_h),
+                                        );
+                                        let bar2 = Rect::from_center_size(
+                                            Pos2::new(play_center.x + 3.8, play_center.y),
+                                            Vec2::new(bar_w, bar_h),
+                                        );
+                                        ui.painter().rect_filled(
+                                            bar1,
+                                            Rounding::same(1.2),
+                                            Color32::WHITE,
+                                        );
+                                        ui.painter().rect_filled(
+                                            bar2,
+                                            Rounding::same(1.2),
+                                            Color32::WHITE,
+                                        );
+                                    }
+                                    if play_resp.clicked() {
+                                        self.toggle_playback();
+                                    }
+
+                                    // Next button: ▶|
+                                    let (next_rect, next_resp) = ui.allocate_exact_size(
+                                        Vec2::splat(28.0),
+                                        Sense::click(),
+                                    );
+                                    if next_resp.hovered() {
+                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                        ui.painter().circle_filled(
+                                            next_rect.center(),
+                                            14.0,
+                                            Color32::from_rgba_unmultiplied(255, 255, 255, 25),
+                                        );
+                                    }
+                                    let n_color = if next_resp.hovered() {
+                                        Color32::WHITE
+                                    } else {
+                                        Color32::from_rgb(205, 205, 215)
+                                    };
+                                    let nc = next_rect.center();
+                                    ui.painter().add(Shape::convex_polygon(
+                                        vec![
+                                            Pos2::new(nc.x - 5.0, nc.y - 5.5),
+                                            Pos2::new(nc.x - 5.0, nc.y + 5.5),
+                                            Pos2::new(nc.x + 4.5, nc.y),
+                                        ],
+                                        n_color,
+                                        Stroke::NONE,
+                                    ));
+                                    ui.painter().line_segment(
+                                        [
+                                            Pos2::new(nc.x + 6.0, nc.y - 5.5),
+                                            Pos2::new(nc.x + 6.0, nc.y + 5.5),
+                                        ],
+                                        Stroke::new(2.2, n_color),
+                                    );
+                                    if next_resp.clicked() {
+                                        self.play_next_item();
+                                    }
+                                });
+                            });
+
+                            // SECTION 3: Right Controls (Fullscreen, Playlist badge, Volume, Audio/Sub)
+                            ui.allocate_new_ui(UiBuilder::new().max_rect(right_rect), |ui| {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
+
+                                    // Fullscreen button ⛶
+                                    let fs_btn = egui::Button::new(
+                                        RichText::new("⛶")
+                                            .size(15.0)
+                                            .color(Color32::from_rgb(215, 215, 225)),
+                                    )
+                                    .fill(Color32::from_rgba_unmultiplied(36, 36, 44, 180))
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        Color32::from_rgba_unmultiplied(70, 70, 80, 150),
+                                    ))
+                                    .rounding(Rounding::same(8.0));
+                                    if ui.add_sized([30.0, 30.0], fs_btn).clicked() {
+                                        self.toggle_fullscreen(ctx);
+                                    }
+
+                                    // Playlist Pill with Badge: [ ☰  (4) ]
+                                    let pl_count = self.playlist.len();
+                                    let count_str = format!("{pl_count}");
+                                    let pl_pill_w = 54.0 + (count_str.len() as f32) * 4.0;
+                                    let (pl_rect, pl_resp) = ui.allocate_exact_size(
+                                        Vec2::new(pl_pill_w, 30.0),
+                                        Sense::click(),
+                                    );
+                                    if pl_resp.hovered() {
+                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                    }
+                                    let pl_bg = if pl_resp.hovered() || self.sidebar_visible {
+                                        Color32::from_rgba_unmultiplied(50, 48, 72, 240)
+                                    } else {
+                                        Color32::from_rgba_unmultiplied(38, 36, 56, 220)
+                                    };
+                                    ui.painter().rect_filled(
+                                        pl_rect,
+                                        Rounding::same(15.0),
+                                        pl_bg,
+                                    );
+                                    ui.painter().rect_stroke(
+                                        pl_rect,
+                                        Rounding::same(15.0),
+                                        Stroke::new(
+                                            1.0,
+                                            Color32::from_rgba_unmultiplied(85, 80, 120, 180),
+                                        ),
+                                    );
+                                    let pl_text_pos =
+                                        Pos2::new(pl_rect.left() + 9.0, pl_rect.center().y);
+                                    ui.painter().text(
+                                        pl_text_pos,
+                                        egui::Align2::LEFT_CENTER,
+                                        "☰",
+                                        egui::FontId::proportional(15.0),
+                                        Color32::from_rgb(220, 220, 230),
+                                    );
+                                    let badge_center =
+                                        Pos2::new(pl_rect.right() - 14.0, pl_rect.center().y);
+                                    ui.painter().circle_filled(
+                                        badge_center,
+                                        9.0,
+                                        Color32::from_rgb(99, 102, 241),
+                                    );
+                                    ui.painter().text(
+                                        badge_center,
+                                        egui::Align2::CENTER_CENTER,
+                                        &count_str,
+                                        egui::FontId::proportional(11.0),
+                                        Color32::WHITE,
+                                    );
+                                    if pl_resp.clicked() {
+                                        self.toggle_sidebar();
+                                    }
+
+                                    // Volume button 🔊
+                                    let vol_icon = if self.volume <= 0.0 {
+                                        "🔇"
+                                    } else if self.volume < 50.0 {
+                                        "🔉"
+                                    } else {
+                                        "🔊"
+                                    };
+                                    let vol_btn = egui::Button::new(
+                                        RichText::new(vol_icon)
+                                            .size(14.0)
+                                            .color(Color32::from_rgb(215, 215, 225)),
+                                    )
+                                    .fill(Color32::from_rgba_unmultiplied(36, 36, 44, 180))
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        Color32::from_rgba_unmultiplied(70, 70, 80, 150),
+                                    ))
+                                    .rounding(Rounding::same(8.0));
+                                    let vol_resp = ui.add_sized([30.0, 30.0], vol_btn);
+                                    volume_btn_rect = Some(vol_resp.rect);
+                                    if vol_resp.clicked() {
+                                        self.volume_popup_open = !self.volume_popup_open;
+                                    }
+
+                                    // Audio & Subtitle Selector Pill: [ 🎙  ENG / CC  ⌵ ]
+                                    let pill_label = self.get_audio_sub_pill_label();
+                                    let audio_sub_pill_w = 98.0 + (pill_label.len() as f32) * 2.5;
+                                    let (as_rect, as_resp) = ui.allocate_exact_size(
+                                        Vec2::new(audio_sub_pill_w, 30.0),
+                                        Sense::click(),
+                                    );
+                                    audio_sub_btn_rect = Some(as_rect);
+                                    if as_resp.hovered() {
+                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                    }
+                                    let as_bg =
+                                        if as_resp.hovered() || self.audio_sub_popup_open {
+                                            Color32::from_rgba_unmultiplied(48, 48, 58, 240)
+                                        } else {
+                                            Color32::from_rgba_unmultiplied(36, 36, 44, 220)
+                                        };
+                                    ui.painter().rect_filled(
+                                        as_rect,
+                                        Rounding::same(15.0),
+                                        as_bg,
+                                    );
+                                    ui.painter().rect_stroke(
+                                        as_rect,
+                                        Rounding::same(15.0),
+                                        Stroke::new(
+                                            1.0,
+                                            Color32::from_rgba_unmultiplied(75, 75, 88, 180),
+                                        ),
+                                    );
+
+                                    let mic_pos =
+                                        Pos2::new(as_rect.left() + 9.0, as_rect.center().y);
+                                    ui.painter().text(
+                                        mic_pos,
+                                        egui::Align2::LEFT_CENTER,
+                                        "🎙",
+                                        egui::FontId::proportional(13.0),
+                                        Color32::from_rgb(160, 160, 240),
+                                    );
+
+                                    let text_pos =
+                                        Pos2::new(as_rect.left() + 27.0, as_rect.center().y);
+                                    ui.painter().text(
+                                        text_pos,
+                                        egui::Align2::LEFT_CENTER,
+                                        &pill_label,
+                                        egui::FontId::proportional(12.0),
+                                        Color32::from_rgb(225, 225, 235),
+                                    );
+
+                                    let chev_pos =
+                                        Pos2::new(as_rect.right() - 10.0, as_rect.center().y);
+                                    ui.painter().text(
+                                        chev_pos,
+                                        egui::Align2::RIGHT_CENTER,
+                                        "⌵",
+                                        egui::FontId::proportional(12.0),
+                                        Color32::from_rgb(175, 175, 185),
+                                    );
+
+                                    if as_resp.clicked() {
+                                        self.audio_sub_popup_open =
+                                            !self.audio_sub_popup_open;
+                                    }
+                                });
                             });
                         });
                     });
             });
+
+        // Floating Audio & Subtitle Popup above the pill button
+        if self.audio_sub_popup_open {
+            if let Some(btn_rect) = audio_sub_btn_rect {
+                let popup_w = 230.0;
+                let popup_pos = Pos2::new(
+                    (btn_rect.center().x - popup_w / 2.0)
+                        .clamp(video_rect.left() + 10.0, video_rect.right() - popup_w - 10.0),
+                    (btn_rect.top() - 210.0).max(video_rect.top() + 10.0),
+                );
+                egui::Area::new(Id::new("audio_sub_popup_overlay"))
+                    .order(Order::Tooltip)
+                    .fixed_pos(popup_pos)
+                    .show(ctx, |ui| {
+                        Frame::none()
+                            .fill(Color32::from_rgba_unmultiplied(22, 22, 28, 245))
+                            .stroke(Stroke::new(
+                                1.0,
+                                Color32::from_rgba_unmultiplied(80, 80, 95, 200),
+                            ))
+                            .rounding(Rounding::same(12.0))
+                            .inner_margin(Margin::same(12.0))
+                            .show(ui, |ui| {
+                                ui.set_width(popup_w);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Audio & Subtitles")
+                                            .strong()
+                                            .size(13.0)
+                                            .color(Color32::WHITE),
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if ui
+                                            .add(
+                                                egui::Button::new(
+                                                    RichText::new("✕")
+                                                        .size(11.0)
+                                                        .color(Color32::GRAY),
+                                                )
+                                                .frame(false),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.audio_sub_popup_open = false;
+                                        }
+                                    });
+                                });
+                                ui.add_space(6.0);
+                                ui.separator();
+                                ui.add_space(6.0);
+
+                                ui.label(
+                                    RichText::new("Audio Track")
+                                        .strong()
+                                        .size(11.5)
+                                        .color(Color32::from_rgb(180, 180, 195)),
+                                );
+                                if self.audio_tracks.is_empty() {
+                                    ui.label(
+                                        RichText::new("No audio tracks detected")
+                                            .italics()
+                                            .size(11.0)
+                                            .color(Color32::GRAY),
+                                    );
+                                } else {
+                                    for (idx, (track_id, label)) in
+                                        self.audio_tracks.iter().enumerate()
+                                    {
+                                        let is_sel = idx == self.selected_audio_idx;
+                                        let resp = ui.selectable_label(
+                                            is_sel,
+                                            RichText::new(label).color(if is_sel {
+                                                Color32::from_rgb(120, 115, 255)
+                                            } else {
+                                                Color32::WHITE
+                                            }),
+                                        );
+                                        if resp.clicked() {
+                                            self.selected_audio_idx = idx;
+                                            if let Some(ref player) = self.player {
+                                                player.set_audio_track(*track_id);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.add_space(6.0);
+
+                                ui.label(
+                                    RichText::new("Subtitles")
+                                        .strong()
+                                        .size(11.5)
+                                        .color(Color32::from_rgb(180, 180, 195)),
+                                );
+                                if self.sub_tracks.is_empty() {
+                                    ui.label(
+                                        RichText::new("No subtitle tracks detected")
+                                            .italics()
+                                            .size(11.0)
+                                            .color(Color32::GRAY),
+                                    );
+                                } else {
+                                    for (idx, (track_id, label)) in
+                                        self.sub_tracks.iter().enumerate()
+                                    {
+                                        let is_sel = idx == self.selected_sub_idx;
+                                        let resp = ui.selectable_label(
+                                            is_sel,
+                                            RichText::new(label).color(if is_sel {
+                                                Color32::from_rgb(120, 115, 255)
+                                            } else {
+                                                Color32::WHITE
+                                            }),
+                                        );
+                                        if resp.clicked() {
+                                            self.selected_sub_idx = idx;
+                                            if let Some(ref player) = self.player {
+                                                player.set_subtitle_track(*track_id);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                    });
+            }
+        }
 
         // Floating vertical Volume Popup above the volume button
         if self.volume_popup_open {
@@ -1267,7 +1965,11 @@ impl SyncPlayApp {
                     .fixed_pos(popup_pos)
                     .show(ctx, |ui| {
                         Frame::none()
-                            .fill(osc_bg)
+                            .fill(Color32::from_rgba_unmultiplied(22, 22, 28, 245))
+                            .stroke(Stroke::new(
+                                1.0,
+                                Color32::from_rgba_unmultiplied(80, 80, 95, 200),
+                            ))
                             .rounding(Rounding::same(10.0))
                             .inner_margin(Margin::same(8.0))
                             .show(ui, |ui| {
@@ -1601,5 +2303,65 @@ mod tests {
         app.is_ready = false;
         app.handle_connection_status(false);
         assert_eq!(app.ready_count, 0);
+    }
+
+    #[test]
+    fn test_media_display_info_and_pill_label() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+
+        // Fallback info when nothing is playing
+        let (title, sub) = app.get_media_display_info();
+        assert_eq!(title, "Synthwave Horizon");
+        assert_eq!(sub, "Episode 01 • Track 1 of 4");
+        assert_eq!(app.get_audio_sub_pill_label(), "ENG / CC");
+
+        // When a URL with episode info is loaded
+        app.current_playing_url = Some("http://localhost:8080/Cyberpunk%20Episode%2002.mkv".to_string());
+        app.playlist = vec![
+            "http://localhost:8080/Cyberpunk%20Episode%2001.mkv".to_string(),
+            "http://localhost:8080/Cyberpunk%20Episode%2002.mkv".to_string(),
+        ];
+        app.selected_playlist_idx = Some(1);
+
+        let (title2, sub2) = app.get_media_display_info();
+        assert_eq!(title2, "Cyberpunk Episode 02");
+        assert_eq!(sub2, "Episode 02 • Track 2 of 2");
+
+        // Pill label adapts to audio & sub tracks
+        app.audio_tracks = vec![(Some(1), "Japanese".to_string())];
+        app.selected_audio_idx = 0;
+        app.sub_tracks = vec![(Some(1), "English".to_string())];
+        app.selected_sub_idx = 0;
+        assert_eq!(app.get_audio_sub_pill_label(), "JPN / CC");
+    }
+
+    #[test]
+    fn test_play_prev_item_navigation() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+        app.playlist = vec![
+            "video1.mp4".to_string(),
+            "video2.mp4".to_string(),
+        ];
+        app.current_playing_url = Some("video2.mp4".to_string());
+        app.selected_playlist_idx = Some(1);
+        app.current_time = 1.0;
+
+        // Navigates to prev track when time <= 3.0
+        app.play_prev_item();
+        assert_eq!(app.selected_playlist_idx, Some(0));
+        assert_eq!(app.current_playing_url, Some("video1.mp4".to_string()));
+
+        // When time > 3.0, restarts current track
+        app.current_duration = 100.0;
+        app.current_time = 15.0;
+        app.play_prev_item();
+        assert_eq!(app.selected_playlist_idx, Some(0));
+        assert_eq!(app.current_time, 0.0);
     }
 }
