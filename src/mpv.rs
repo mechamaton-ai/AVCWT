@@ -308,7 +308,10 @@ impl MpvPlayer {
                 "extractor-args=youtube:player_client=visionos",
             );
             set_opt("hwdec", "no");
-            set_opt("ytdl-format", "bestvideo[vcodec!^=av01]+bestaudio/best");
+            set_opt(
+                "ytdl-format",
+                "(bestvideo[dynamic_range=SDR][vcodec!^=av01]/bestvideo[vcodec!^=av01])+bestaudio/best",
+            );
 
             let init_rc = (api.mpv_initialize)(handle);
             if init_rc < 0 {
@@ -983,7 +986,7 @@ mod tests {
         );
         assert_eq!(
             player.get_property_string("ytdl-format").as_deref(),
-            Some("bestvideo[vcodec!^=av01]+bestaudio/best")
+            Some("(bestvideo[dynamic_range=SDR][vcodec!^=av01]/bestvideo[vcodec!^=av01])+bestaudio/best")
         );
         assert_eq!(player.get_property_string("hwdec").as_deref(), Some("no"));
         player.update_cache_size(250);
