@@ -634,7 +634,7 @@ impl SyncPlayApp {
                         self.video_aspect = aspect;
                     }
                 }
-                MpvEvent::MouseMoved => self.show_osc(),
+                MpvEvent::MouseMoved => {}
                 MpvEvent::EofReached => self.play_next_item(),
             }
         }
@@ -779,18 +779,12 @@ impl SyncPlayApp {
                 let video_rect = ui.max_rect();
                 let response = ui.allocate_rect(video_rect, Sense::click_and_drag());
 
-                // Detect mouse movement or click inside video panel to show OSC
+                // Clicking on the video panel toggles / shows the OSC controls
                 let pointer_pos =
                     ctx.input(|i| i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()));
-                if pointer_pos != self.last_pointer_pos {
-                    self.last_pointer_pos = pointer_pos;
-                    if let Some(pos) = pointer_pos {
-                        if video_rect.contains(pos) {
-                            self.show_osc();
-                        }
-                    }
-                }
-                if response.clicked() || response.dragged() {
+                self.last_pointer_pos = pointer_pos;
+
+                if response.clicked() {
                     self.show_osc();
                 }
 
