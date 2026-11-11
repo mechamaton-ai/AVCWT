@@ -918,12 +918,6 @@ impl SyncPlayApp {
                                 "Cache: 00:00".to_string()
                             };
                             ui.label(RichText::new(cache_text).color(Color32::WHITE));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(
-                                    RichText::new(format!("Volume: {:.0}%", self.volume))
-                                        .color(Color32::WHITE),
-                                );
-                            });
                         });
                     });
             });
@@ -1255,9 +1249,24 @@ impl eframe::App for SyncPlayApp {
         self.process_background_events(ctx);
 
         // Global shortcuts: Space toggles playback (when not typing in a text field), Escape exits fullscreen
-        if !ctx.wants_keyboard_input() {
-            if ctx.input(|i| i.key_pressed(Key::Space)) {
+        let typing = ctx.wants_keyboard_input() || self.settings_dialog_open || self.edit_playlist_dialog_open;
+        if !typing {
+            let space_pressed = ctx.input(|i| {
+                i.key_pressed(Key::Space)
+                    || i.events.iter().any(|ev| match ev {
+                        egui::Event::Key {
+                            key: Key::Space,
+                            pressed: true,
+                            repeat: false,
+                            ..
+                        } => true,
+                        egui::Event::Text(t) if t == " " => true,
+                        _ => false,
+                    })
+            });
+            if space_pressed {
                 self.toggle_playback();
+                self.show_osc();
             }
         }
         if ctx.input(|i| i.key_pressed(Key::Escape)) && self.is_fullscreen {
