@@ -1360,7 +1360,7 @@ impl SyncPlayApp {
                                         ui.painter().rect_filled(
                                             played_rect,
                                             Rounding::same(3.0),
-                                            Color32::from_rgb(109, 94, 252),
+                                            Color32::from_rgb(42, 130, 218),
                                         );
                                     }
 
@@ -1515,16 +1515,16 @@ impl SyncPlayApp {
                                         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                                     }
                                     let play_center = play_rect.center();
-                                    // Purple glow
+                                    // Blue glow
                                     ui.painter().circle_filled(
                                         play_center,
                                         24.0,
-                                        Color32::from_rgba_unmultiplied(93, 75, 246, 50),
+                                        Color32::from_rgba_unmultiplied(42, 130, 218, 55),
                                     );
                                     let btn_color = if play_resp.hovered() {
-                                        Color32::from_rgb(115, 98, 255)
+                                        Color32::from_rgb(60, 150, 240)
                                     } else {
-                                        Color32::from_rgb(93, 75, 246)
+                                        Color32::from_rgb(42, 130, 218)
                                     };
                                     ui.painter().circle_filled(play_center, 21.0, btn_color);
 
@@ -1645,14 +1645,14 @@ impl SyncPlayApp {
                                             }),
                                     )
                                     .fill(if self.sidebar_visible {
-                                        Color32::from_rgba_unmultiplied(50, 48, 72, 240)
+                                        Color32::from_rgba_unmultiplied(36, 60, 95, 240)
                                     } else {
                                         Color32::from_rgba_unmultiplied(36, 36, 44, 180)
                                     })
                                     .stroke(Stroke::new(
                                         1.0_f32,
                                         if self.sidebar_visible {
-                                            Color32::from_rgba_unmultiplied(85, 80, 120, 180)
+                                            Color32::from_rgba_unmultiplied(60, 140, 230, 200)
                                         } else {
                                             Color32::from_rgba_unmultiplied(70, 70, 80, 150)
                                         },
@@ -1698,7 +1698,7 @@ impl SyncPlayApp {
                                     }
                                     let as_bg =
                                         if as_resp.hovered() || self.audio_sub_popup_open {
-                                            Color32::from_rgba_unmultiplied(48, 48, 58, 240)
+                                            Color32::from_rgba_unmultiplied(36, 60, 95, 240)
                                         } else {
                                             Color32::from_rgba_unmultiplied(36, 36, 44, 220)
                                         };
@@ -1712,7 +1712,11 @@ impl SyncPlayApp {
                                         Rounding::same(15.0),
                                         Stroke::new(
                                             1.0_f32,
-                                            Color32::from_rgba_unmultiplied(75, 75, 88, 180),
+                                            if self.audio_sub_popup_open {
+                                                Color32::from_rgba_unmultiplied(60, 140, 230, 200)
+                                            } else {
+                                                Color32::from_rgba_unmultiplied(75, 75, 88, 180)
+                                            },
                                         ),
                                     );
 
@@ -1768,9 +1772,9 @@ impl SyncPlayApp {
                                         if ui
                                             .add(
                                                 egui::Button::new(
-                                                    RichText::new("✕")
+                                                    RichText::new("X")
                                                         .size(11.0)
-                                                        .color(Color32::GRAY),
+                                                        .color(Color32::from_rgb(160, 160, 175)),
                                                 )
                                                 .frame(false),
                                             )
@@ -1802,14 +1806,15 @@ impl SyncPlayApp {
                                         self.audio_tracks.iter().enumerate()
                                     {
                                         let is_sel = idx == self.selected_audio_idx;
-                                        let resp = ui.selectable_label(
-                                            is_sel,
-                                            RichText::new(label).color(if is_sel {
-                                                Color32::from_rgb(120, 115, 255)
-                                            } else {
-                                                Color32::WHITE
-                                            }),
-                                        );
+                                        let text = if is_sel {
+                                            RichText::new(label)
+                                                .strong()
+                                                .color(Color32::WHITE)
+                                        } else {
+                                            RichText::new(label)
+                                                .color(Color32::from_rgb(220, 220, 230))
+                                        };
+                                        let resp = ui.selectable_label(is_sel, text);
                                         if resp.clicked() {
                                             self.selected_audio_idx = idx;
                                             if let Some(ref player) = self.player {
@@ -1841,14 +1846,15 @@ impl SyncPlayApp {
                                         self.sub_tracks.iter().enumerate()
                                     {
                                         let is_sel = idx == self.selected_sub_idx;
-                                        let resp = ui.selectable_label(
-                                            is_sel,
-                                            RichText::new(label).color(if is_sel {
-                                                Color32::from_rgb(120, 115, 255)
-                                            } else {
-                                                Color32::WHITE
-                                            }),
-                                        );
+                                        let text = if is_sel {
+                                            RichText::new(label)
+                                                .strong()
+                                                .color(Color32::WHITE)
+                                        } else {
+                                            RichText::new(label)
+                                                .color(Color32::from_rgb(220, 220, 230))
+                                        };
+                                        let resp = ui.selectable_label(is_sel, text);
                                         if resp.clicked() {
                                             self.selected_sub_idx = idx;
                                             if let Some(ref player) = self.player {
