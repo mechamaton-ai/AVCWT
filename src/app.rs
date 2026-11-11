@@ -37,6 +37,7 @@ pub struct SyncPlayApp {
     is_paused: bool,
     volume: f64,
     video_aspect: f64,
+    media_title: Option<String>,
 
     // Audio & subtitle tracks
     audio_tracks: Vec<(Option<i64>, String)>,
@@ -122,6 +123,7 @@ impl SyncPlayApp {
             is_paused: true,
             volume: 100.0,
             video_aspect: 16.0 / 9.0,
+            media_title: None,
 
             audio_tracks: vec![(None, "None".to_string())],
             selected_audio_idx: 0,
@@ -331,6 +333,7 @@ impl SyncPlayApp {
     pub fn play_url(&mut self, url: String, broadcast: bool) {
         self.video_loading = true;
         self.is_live = false;
+        self.media_title = None;
         self.current_playing_url = Some(url.clone());
         self.is_paused = true;
         self.pending_pause = Some(false);
@@ -767,6 +770,11 @@ impl SyncPlayApp {
                         self.video_aspect = aspect;
                     }
                 }
+                MpvEvent::MediaTitleChanged(title) => {
+                    if !title.trim().is_empty() {
+                        self.media_title = Some(title);
+                    }
+                }
                 MpvEvent::MouseMoved => {}
                 MpvEvent::EofReached => self.play_next_item(),
             }
@@ -1098,20 +1106,40 @@ impl SyncPlayApp {
     }
 
     fn get_media_display_info(&self) -> (String, String) {
-        if let Some(ref url) = self.current_playing_url {
-            let raw_name = url.rsplit('/').next().unwrap_or(url);
-            let raw_name = raw_name.rsplit('\\').next().unwrap_or(raw_name);
-            let name_without_query = raw_name.split('?').next().unwrap_or(raw_name);
-            let unescaped = name_without_query
-                .replace("%20", " ")
-                .replace("%28", "(")
-                .replace("%29", ")")
-                .replace("%5B", "[")
-                .replace("%5D", "]");
-            let display_title = if let Some(dot_idx) = unescaped.rfind('.') {
-                unescaped[..dot_idx].to_string()
+        let display_title = if let Some(ref title) = self.media_title {
+            if !title.trim().is_empty() {
+                Some(title.clone())
             } else {
-                unescaped
+                None
+            }
+        } else if let Some(title) = self.player.as_ref().and_then(|p| p.get_media_title()) {
+            if !title.trim().is_empty() {
+                Some(title)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(ref url) = self.current_playing_url {
+            let title = if let Some(t) = display_title {
+                t
+            } else {
+                let raw_name = url.rsplit('/').next().unwrap_or(url);
+                let raw_name = raw_name.rsplit('\\').next().unwrap_or(raw_name);
+                let name_without_query = raw_name.split('?').next().unwrap_or(raw_name);
+                let unescaped = name_without_query
+                    .replace("%20", " ")
+                    .replace("%28", "(")
+                    .replace("%29", ")")
+                    .replace("%5B", "[")
+                    .replace("%5D", "]");
+                if let Some(dot_idx) = unescaped.rfind('.') {
+                    unescaped[..dot_idx].to_string()
+                } else {
+                    unescaped
+                }
             };
 
             let track_idx = match self.selected_playlist_idx {
@@ -1125,69 +1153,46 @@ impl SyncPlayApp {
             };
             let total_tracks = self.playlist.len().max(1);
 
-            let ep_part = if let Some(idx) = display_title.to_lowercase().find("episode") {
-                let rest = &display_title[idx..];
+            let ep_part = if let Some(idx) = title.to_lowercase().find("episode") {
+                let rest = &title[idx..];
                 let tokens: Vec<&str> = rest.split_whitespace().take(2).collect();
                 format!("{} • ", tokens.join(" "))
-            } else if let Some(idx) = display_title.to_lowercase().find("ep.") {
-                let rest = &display_title[idx..];
+            } else if let Some(idx) = title.to_lowercase().find("ep.") {
+                let rest = &title[idx..];
                 let tokens: Vec<&str> = rest.split_whitespace().take(2).collect();
                 format!("{} • ", tokens.join(" "))
-            } else if let Some(idx) = display_title.to_lowercase().find("ep ") {
-                let rest = &display_title[idx..];
+            } else if let Some(idx) = title.to_lowercase().find("ep ") {
+                let rest = &title[idx..];
                 let tokens: Vec<&str> = rest.split_whitespace().take(2).collect();
                 format!("{} • ", tokens.join(" "))
             } else {
                 String::new()
             };
 
-            let subtitle = format!("{ep_part}Track {track_idx} of {total_tracks}");
-            (display_title, subtitle)
+            let subtitle = if self.is_live {
+                format!("Live Stream • Track {track_idx} of {total_tracks}")
+            } else if !ep_part.is_empty() {
+                format!("{ep_part}Track {track_idx} of {total_tracks}")
+            } else if self.playlist.len() > 1 {
+                format!("Track {track_idx} of {total_tracks}")
+            } else {
+                "Track 1 of 1".to_string()
+            };
+
+            (title, subtitle)
+        } else if let Some(t) = display_title {
+            (t, "Direct Playback".to_string())
         } else {
             (
-                "Synthwave Horizon".to_string(),
-                "Episode 01 • Track 1 of 4".to_string(),
+                "No Media Playing".to_string(),
+                "Ready to play".to_string(),
             )
         }
     }
 
+    #[cfg(test)]
     fn get_audio_sub_pill_label(&self) -> String {
-        let audio_label = self
-            .audio_tracks
-            .get(self.selected_audio_idx)
-            .map(|(_, l)| l.as_str())
-            .unwrap_or("ENG");
-        let sub_label = self
-            .sub_tracks
-            .get(self.selected_sub_idx)
-            .map(|(_, l)| l.as_str())
-            .unwrap_or("CC");
-
-        let short_audio = if audio_label.to_lowercase().contains("eng") {
-            "ENG".to_string()
-        } else if audio_label.to_lowercase().contains("jpn")
-            || audio_label.to_lowercase().contains("jap")
-        {
-            "JPN".to_string()
-        } else if audio_label.eq_ignore_ascii_case("none") {
-            "ENG".to_string()
-        } else if audio_label.len() > 3 {
-            audio_label.chars().take(3).collect::<String>().to_uppercase()
-        } else {
-            audio_label.to_uppercase()
-        };
-
-        let short_sub = if sub_label.to_lowercase().contains("none") {
-            "CC".to_string()
-        } else if sub_label.to_lowercase().contains("eng") {
-            "CC".to_string()
-        } else if sub_label.len() > 3 {
-            sub_label.chars().take(3).collect::<String>().to_uppercase()
-        } else {
-            sub_label.to_uppercase()
-        };
-
-        format!("{short_audio} / {short_sub}")
+        "Audio/CC".to_string()
     }
 
     fn render_osc_overlays(&mut self, ctx: &Context, video_rect: Rect) {
@@ -1402,7 +1407,7 @@ impl SyncPlayApp {
                             );
 
                             let center_w = 126.0;
-                            let right_w = 266.0;
+                            let right_w = 200.0;
                             let center_x = row_rect.center().x;
                             let right_left = (row_rect.right() - right_w)
                                 .max(row_rect.left() + 200.0);
@@ -1432,56 +1437,9 @@ impl SyncPlayApp {
                             // SECTION 1: Left Track Information
                             ui.allocate_new_ui(UiBuilder::new().max_rect(left_rect), |ui| {
                                 ui.horizontal_centered(|ui| {
-                                    // 38x38 Artwork container with vector musical note ♫
-                                    let (art_rect, _) = ui.allocate_exact_size(
-                                        Vec2::splat(38.0),
-                                        Sense::hover(),
-                                    );
-                                    ui.painter().rect_filled(
-                                        art_rect,
-                                        Rounding::same(9.0),
-                                        Color32::from_rgb(112, 88, 252),
-                                    );
-
-                                    let bl = art_rect.left();
-                                    let bt = art_rect.top();
-                                    ui.painter().circle_filled(
-                                        Pos2::new(bl + 12.0, bt + 25.5),
-                                        3.0,
-                                        Color32::WHITE,
-                                    );
-                                    ui.painter().circle_filled(
-                                        Pos2::new(bl + 24.5, bt + 21.5),
-                                        3.0,
-                                        Color32::WHITE,
-                                    );
-                                    ui.painter().line_segment(
-                                        [
-                                            Pos2::new(bl + 14.5, bt + 25.5),
-                                            Pos2::new(bl + 14.5, bt + 12.0),
-                                        ],
-                                        Stroke::new(2.2_f32, Color32::WHITE),
-                                    );
-                                    ui.painter().line_segment(
-                                        [
-                                            Pos2::new(bl + 27.0, bt + 21.5),
-                                            Pos2::new(bl + 27.0, bt + 8.0),
-                                        ],
-                                        Stroke::new(2.2_f32, Color32::WHITE),
-                                    );
-                                    ui.painter().line_segment(
-                                        [
-                                            Pos2::new(bl + 13.5, bt + 13.0),
-                                            Pos2::new(bl + 28.0, bt + 9.0),
-                                        ],
-                                        Stroke::new(3.2_f32, Color32::WHITE),
-                                    );
-
-                                    ui.add_space(8.0);
-
                                     // Title & Subtitle vertical column
                                     ui.vertical(|ui| {
-                                        ui.set_max_width((left_rect.width() - 50.0).max(10.0));
+                                        ui.set_max_width(left_rect.width().max(10.0));
                                         let (title, subtitle) = self.get_media_display_info();
                                         ui.add(
                                             egui::Label::new(
@@ -1676,59 +1634,31 @@ impl SyncPlayApp {
                                         self.toggle_fullscreen(ctx);
                                     }
 
-                                    // Playlist Pill with Badge: [ ☰  (4) ]
-                                    let pl_count = self.playlist.len();
-                                    let count_str = format!("{pl_count}");
-                                    let pl_pill_w = 54.0 + (count_str.len() as f32) * 4.0;
-                                    let (pl_rect, pl_resp) = ui.allocate_exact_size(
-                                        Vec2::new(pl_pill_w, 30.0),
-                                        Sense::click(),
-                                    );
-                                    if pl_resp.hovered() {
-                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                                    }
-                                    let pl_bg = if pl_resp.hovered() || self.sidebar_visible {
+                                    // Playlist Button ☰ (clean button without count badge)
+                                    let pl_btn = egui::Button::new(
+                                        RichText::new("☰")
+                                            .size(15.0)
+                                            .color(if self.sidebar_visible {
+                                                Color32::WHITE
+                                            } else {
+                                                Color32::from_rgb(215, 215, 225)
+                                            }),
+                                    )
+                                    .fill(if self.sidebar_visible {
                                         Color32::from_rgba_unmultiplied(50, 48, 72, 240)
                                     } else {
-                                        Color32::from_rgba_unmultiplied(38, 36, 56, 220)
-                                    };
-                                    ui.painter().rect_filled(
-                                        pl_rect,
-                                        Rounding::same(15.0),
-                                        pl_bg,
-                                    );
-                                    ui.painter().rect_stroke(
-                                        pl_rect,
-                                        Rounding::same(15.0),
-                                        Stroke::new(
-                                            1.0_f32,
-                                            Color32::from_rgba_unmultiplied(85, 80, 120, 180),
-                                        ),
-                                    );
-                                    let pl_text_pos =
-                                        Pos2::new(pl_rect.left() + 9.0, pl_rect.center().y);
-                                    ui.painter().text(
-                                        pl_text_pos,
-                                        egui::Align2::LEFT_CENTER,
-                                        "☰",
-                                        egui::FontId::proportional(15.0),
-                                        Color32::from_rgb(220, 220, 230),
-                                    );
-                                    let badge_center =
-                                        Pos2::new(pl_rect.right() - 14.0, pl_rect.center().y);
-                                    ui.painter().circle_filled(
-                                        badge_center,
-                                        9.0,
-                                        Color32::from_rgb(99, 102, 241),
-                                    );
-                                    ui.painter().text(
-                                        badge_center,
-                                        egui::Align2::CENTER_CENTER,
-                                        &count_str,
-                                        egui::FontId::proportional(11.0),
-                                        Color32::WHITE,
-                                    );
-                                    if pl_resp.clicked() {
+                                        Color32::from_rgba_unmultiplied(36, 36, 44, 180)
+                                    })
+                                    .stroke(Stroke::new(
+                                        1.0_f32,
+                                        if self.sidebar_visible {
+                                            Color32::from_rgba_unmultiplied(85, 80, 120, 180)
+                                        } else {
+                                            Color32::from_rgba_unmultiplied(70, 70, 80, 150)
+                                        },
+                                    ))
+                                    .rounding(Rounding::same(8.0));
+                                    if ui.add_sized([30.0, 30.0], pl_btn).clicked() {
                                         self.toggle_sidebar();
                                     }
 
@@ -1757,11 +1687,9 @@ impl SyncPlayApp {
                                         self.volume_popup_open = !self.volume_popup_open;
                                     }
 
-                                    // Audio & Subtitle Selector Pill: [ 🎙  ENG / CC  ⌵ ]
-                                    let pill_label = self.get_audio_sub_pill_label();
-                                    let audio_sub_pill_w = 98.0 + (pill_label.len() as f32) * 2.5;
+                                    // Audio & Subtitle Selector Pill: [ Audio/CC ]
                                     let (as_rect, as_resp) = ui.allocate_exact_size(
-                                        Vec2::new(audio_sub_pill_w, 30.0),
+                                        Vec2::new(76.0, 30.0),
                                         Sense::click(),
                                     );
                                     audio_sub_btn_rect = Some(as_rect);
@@ -1788,34 +1716,12 @@ impl SyncPlayApp {
                                         ),
                                     );
 
-                                    let mic_pos =
-                                        Pos2::new(as_rect.left() + 9.0, as_rect.center().y);
                                     ui.painter().text(
-                                        mic_pos,
-                                        egui::Align2::LEFT_CENTER,
-                                        "🎙",
-                                        egui::FontId::proportional(13.0),
-                                        Color32::from_rgb(160, 160, 240),
-                                    );
-
-                                    let text_pos =
-                                        Pos2::new(as_rect.left() + 27.0, as_rect.center().y);
-                                    ui.painter().text(
-                                        text_pos,
-                                        egui::Align2::LEFT_CENTER,
-                                        &pill_label,
-                                        egui::FontId::proportional(12.0),
+                                        as_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        "Audio/CC",
+                                        egui::FontId::proportional(12.5),
                                         Color32::from_rgb(225, 225, 235),
-                                    );
-
-                                    let chev_pos =
-                                        Pos2::new(as_rect.right() - 10.0, as_rect.center().y);
-                                    ui.painter().text(
-                                        chev_pos,
-                                        egui::Align2::RIGHT_CENTER,
-                                        "⌵",
-                                        egui::FontId::proportional(12.0),
-                                        Color32::from_rgb(175, 175, 185),
                                     );
 
                                     if as_resp.clicked() {
@@ -2314,9 +2220,9 @@ mod tests {
 
         // Fallback info when nothing is playing
         let (title, sub) = app.get_media_display_info();
-        assert_eq!(title, "Synthwave Horizon");
-        assert_eq!(sub, "Episode 01 • Track 1 of 4");
-        assert_eq!(app.get_audio_sub_pill_label(), "ENG / CC");
+        assert_eq!(title, "No Media Playing");
+        assert_eq!(sub, "Ready to play");
+        assert_eq!(app.get_audio_sub_pill_label(), "Audio/CC");
 
         // When a URL with episode info is loaded
         app.current_playing_url = Some("http://localhost:8080/Cyberpunk%20Episode%2002.mkv".to_string());
@@ -2330,12 +2236,11 @@ mod tests {
         assert_eq!(title2, "Cyberpunk Episode 02");
         assert_eq!(sub2, "Episode 02 • Track 2 of 2");
 
-        // Pill label adapts to audio & sub tracks
-        app.audio_tracks = vec![(Some(1), "Japanese".to_string())];
-        app.selected_audio_idx = 0;
-        app.sub_tracks = vec![(Some(1), "English".to_string())];
-        app.selected_sub_idx = 0;
-        assert_eq!(app.get_audio_sub_pill_label(), "JPN / CC");
+        // When media_title is explicitly set by MPV (e.g. YouTube video or stream)
+        app.media_title = Some("Lofi Hip Hop Radio 24/7".to_string());
+        let (title3, sub3) = app.get_media_display_info();
+        assert_eq!(title3, "Lofi Hip Hop Radio 24/7");
+        assert_eq!(sub3, "Track 2 of 2");
     }
 
     #[test]

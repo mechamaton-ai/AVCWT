@@ -251,6 +251,7 @@ pub enum MpvEvent {
     PauseChanged(bool),
     TrackListChanged(Vec<MediaTrack>),
     VideoAspectChanged(f64),
+    MediaTitleChanged(String),
     MouseMoved,
     EofReached,
 }
@@ -369,6 +370,7 @@ impl MpvPlayer {
             observe(8, "video-params/aspect", MPV_FORMAT_DOUBLE);
             observe(9, "dwidth", MPV_FORMAT_INT64);
             observe(10, "dheight", MPV_FORMAT_INT64);
+            observe(11, "media-title", MPV_FORMAT_STRING);
 
             Ok(Self {
                 api,
@@ -589,6 +591,10 @@ impl MpvPlayer {
         }
     }
 
+    pub fn get_media_title(&self) -> Option<String> {
+        self.get_property_string("media-title")
+    }
+
     fn read_track_list(&self) -> Vec<MediaTrack> {
         let count = self.get_property_i64("track-list/count").unwrap_or(0);
         let mut tracks = Vec::new();
@@ -682,6 +688,17 @@ impl MpvPlayer {
                             }
                             "mouse-pos" => {
                                 out.push(MpvEvent::MouseMoved);
+                            }
+                            "media-title"
+                                if prop.format == MPV_FORMAT_STRING && !prop.data.is_null() =>
+                            {
+                                let raw_ptr = unsafe { *(prop.data as *const *const c_char) };
+                                if !raw_ptr.is_null() {
+                                    let s = unsafe {
+                                        CStr::from_ptr(raw_ptr).to_string_lossy().into_owned()
+                                    };
+                                    out.push(MpvEvent::MediaTitleChanged(s));
+                                }
                             }
                             _ => {}
                         }
