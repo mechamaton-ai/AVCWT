@@ -330,6 +330,49 @@ impl SyncPlayApp {
         }
     }
 
+    /// Re-initializes the underlying `libmpv` instance and reloads the current video or position.
+    pub fn reload_player(&mut self) {
+        let resume_url = self.current_playing_url.clone();
+        let resume_time = self.current_time;
+        let resume_paused = self.is_paused;
+
+        // Drop existing player to release libmpv resources cleanly
+        self.player = None;
+        self.video_texture = None;
+
+        match MpvPlayer::new() {
+            Ok(mut p) => {
+                p.update_cache_size(self.current_cache_size);
+                p.set_volume(self.volume);
+                p.set_pause(true);
+
+                if let Some(ref url) = resume_url {
+                    p.play(url);
+                    if resume_time > 0.0 && !self.is_live {
+                        p.set_time_pos(resume_time);
+                    }
+                    if !resume_paused {
+                        p.set_pause(false);
+                    }
+                }
+
+                self.player = Some(p);
+                self.player_error = None;
+                self.video_loading = false;
+                self.pending_seek = None;
+                self.pending_pause = None;
+                self.pending_pause_apply_at = None;
+                self.ignore_next_seek = false;
+                self.ignore_next_pause = false;
+                info!("Player successfully reloaded and resumed");
+            }
+            Err(e) => {
+                warn!("Failed to reload MPV player: {}", e);
+                self.player_error = Some(e);
+            }
+        }
+    }
+
     pub fn play_next_item(&mut self) {
         let Some(ref current_url) = self.current_playing_url else {
             return;
@@ -1156,6 +1199,22 @@ impl SyncPlayApp {
                         .clicked()
                     {
                         self.host_server();
+                    }
+
+                    ui.add_space(14.0);
+                    let reload_btn = egui::Button::new(
+                        RichText::new("Force Reload Player").strong().color(Color32::WHITE),
+                    )
+                    .fill(Color32::from_rgb(52, 52, 56))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(110, 110, 120)))
+                    .rounding(Rounding::same(6.0));
+
+                    if ui
+                        .add_sized([ui.available_width(), 30.0], reload_btn)
+                        .clicked()
+                    {
+                        self.reload_player();
+                        self.show_osc();
                     }
                 });
             self.settings_dialog_open = open;
