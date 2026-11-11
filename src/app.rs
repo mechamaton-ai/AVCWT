@@ -63,6 +63,8 @@ pub struct SyncPlayApp {
     ip_input: String,
     current_cache_size: i64,
     viewers_count: usize,
+    is_ready: bool,
+    ready_count: usize,
     conn_state: ConnectionUiState,
     ws_client: WebSocketClient,
     is_host: bool,
@@ -142,6 +144,8 @@ impl SyncPlayApp {
             ip_input: saved.host_address,
             current_cache_size: saved.cache_size,
             viewers_count: 0,
+            is_ready: false,
+            ready_count: 0,
             conn_state: ConnectionUiState::Disconnected,
             ws_client: WebSocketClient::new(),
             is_host: false,
@@ -470,6 +474,10 @@ impl SyncPlayApp {
         self.ws_client.set_running(connected);
         if connected {
             self.conn_state = ConnectionUiState::Connected;
+            if self.is_ready {
+                self.ws_client
+                    .send_message(SyncMessage::Ready { state: true });
+            }
             if self.is_host {
                 self.broadcast_playlist();
                 if let Some(ref url) = self.current_playing_url {
@@ -487,6 +495,7 @@ impl SyncPlayApp {
             }
         } else {
             self.conn_state = ConnectionUiState::Disconnected;
+            self.ready_count = if self.is_ready { 1 } else { 0 };
             if !self.is_paused {
                 self.ignore_next_pause = true;
                 self.is_paused = true;
@@ -548,6 +557,10 @@ impl SyncPlayApp {
             }
             SyncMessage::TimeSync { .. } => {}
             SyncMessage::RequestSync => {}
+            SyncMessage::Ready { .. } => {}
+            SyncMessage::ReadyCount { count } => {
+                self.ready_count = count;
+            }
         }
     }
 
@@ -768,19 +781,42 @@ impl SyncPlayApp {
                     });
 
                 ui.add_space(8.0);
-                if ui
-                    .add_sized(
-                        [ui.available_width(), 30.0],
-                        egui::Button::new(RichText::new("Edit Playlist").color(Color32::WHITE))
-                            .fill(Color32::from_rgb(62, 62, 66))
-                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(90, 90, 96)))
-                            .rounding(Rounding::same(6.0)),
+                ui.horizontal(|ui| {
+                    let spacing = ui.spacing().item_spacing.x;
+                    let half_width = ((ui.available_width() - spacing) / 2.0).max(10.0);
+
+                    let edit_btn = egui::Button::new(RichText::new("Edit Playlist").color(Color32::WHITE))
+                        .fill(Color32::from_rgb(62, 62, 66))
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(90, 90, 96)))
+                        .rounding(Rounding::same(6.0));
+                    if ui.add_sized([half_width, 30.0], edit_btn).clicked() {
+                        self.edit_playlist_buffer = self.playlist.join("\n");
+                        self.edit_playlist_dialog_open = true;
+                    }
+
+                    let (ready_bg, ready_stroke) = if self.is_ready {
+                        (Color32::from_rgb(38, 140, 55), Color32::from_rgb(60, 190, 85))
+                    } else {
+                        (Color32::from_rgb(175, 40, 40), Color32::from_rgb(220, 70, 70))
+                    };
+
+                    let ready_btn = egui::Button::new(
+                        RichText::new("Ready").strong().color(Color32::WHITE),
                     )
-                    .clicked()
-                {
-                    self.edit_playlist_buffer = self.playlist.join("\n");
-                    self.edit_playlist_dialog_open = true;
-                }
+                    .fill(ready_bg)
+                    .stroke(Stroke::new(1.0_f32, ready_stroke))
+                    .rounding(Rounding::same(6.0));
+
+                    if ui.add_sized([half_width, 30.0], ready_btn).clicked() {
+                        self.is_ready = !self.is_ready;
+                        if self.ws_client.is_running() {
+                            self.ws_client
+                                .send_message(SyncMessage::Ready { state: self.is_ready });
+                        } else {
+                            self.ready_count = if self.is_ready { 1 } else { 0 };
+                        }
+                    }
+                });
 
                 ui.add_space(14.0);
                 if ui
@@ -1042,6 +1078,24 @@ impl SyncPlayApp {
                                 "Cache: 00:00".to_string()
                             };
                             ui.label(RichText::new(cache_text).color(Color32::WHITE));
+
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let ready_color = if self.ready_count > 0
+                                    && (self.viewers_count == 0
+                                        || self.ready_count >= self.viewers_count)
+                                {
+                                    Color32::from_rgb(90, 220, 110)
+                                } else if self.ready_count > 0 {
+                                    Color32::from_rgb(255, 205, 90)
+                                } else {
+                                    Color32::WHITE
+                                };
+                                ui.label(
+                                    RichText::new(format!("Ready: {}", self.ready_count))
+                                        .color(ready_color)
+                                        .strong(),
+                                );
+                            });
                         });
                     });
             });
@@ -1524,5 +1578,28 @@ mod tests {
         assert!(!app.video_loading);
         assert_eq!(app.current_time, 45.0);
         assert!(app.ignore_next_seek);
+    }
+
+    #[test]
+    fn test_ready_state_handling() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+        assert!(!app.is_ready);
+        assert_eq!(app.ready_count, 0);
+
+        // Network ReadyCount update
+        app.handle_network_message(SyncMessage::ReadyCount { count: 3 });
+        assert_eq!(app.ready_count, 3);
+
+        // When disconnected, ready_count reflects local ready state
+        app.is_ready = true;
+        app.handle_connection_status(false);
+        assert_eq!(app.ready_count, 1);
+
+        app.is_ready = false;
+        app.handle_connection_status(false);
+        assert_eq!(app.ready_count, 0);
     }
 }

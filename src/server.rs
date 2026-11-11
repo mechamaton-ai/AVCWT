@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -24,6 +24,7 @@ pub struct ServerState {
     pub current_time: f64,
     pub is_paused: bool,
     pub client_times: HashMap<ClientId, f64>,
+    pub ready_clients: HashSet<ClientId>,
 }
 
 impl Default for ServerState {
@@ -41,6 +42,7 @@ impl ServerState {
             current_time: 0.0,
             is_paused: true,
             client_times: HashMap::new(),
+            ready_clients: HashSet::new(),
         }
     }
 
@@ -68,10 +70,24 @@ impl ServerState {
         }
     }
 
+    pub fn broadcast_ready_count(&self) {
+        if let Ok(msg) = serde_json::to_string(&SyncMessage::ReadyCount {
+            count: self.ready_clients.len(),
+        }) {
+            self.broadcast_all(&msg);
+        }
+    }
+
     pub fn register_client(&mut self, id: ClientId, tx: ClientSender) {
         self.clients.insert(id, tx.clone());
         info!("Client connected. Total clients: {}", self.clients.len());
         self.broadcast_user_count();
+
+        if let Ok(ready_msg) = serde_json::to_string(&SyncMessage::ReadyCount {
+            count: self.ready_clients.len(),
+        }) {
+            let _ = tx.send(ready_msg);
+        }
 
         if !self.playlist.is_empty() {
             if let Ok(msg) = serde_json::to_string(&SyncMessage::Playlist {
@@ -101,8 +117,12 @@ impl ServerState {
     pub fn unregister_client(&mut self, id: ClientId) {
         self.clients.remove(&id);
         self.client_times.remove(&id);
+        let was_ready = self.ready_clients.remove(&id);
         info!("Client disconnected. Total clients: {}", self.clients.len());
         self.broadcast_user_count();
+        if was_ready {
+            self.broadcast_ready_count();
+        }
 
         self.is_paused = true;
         if !self.clients.is_empty() {
@@ -202,9 +222,24 @@ impl ServerState {
                                     let _ = tx.send(pause_msg);
                                 }
                             }
+                            if let Ok(ready_msg) =
+                                serde_json::to_string(&SyncMessage::ReadyCount { count: self.ready_clients.len() })
+                            {
+                                let _ = tx.send(ready_msg);
+                            }
                         }
                         return;
                     }
+                    SyncMessage::Ready { state } => {
+                        if state {
+                            self.ready_clients.insert(sender_id);
+                        } else {
+                            self.ready_clients.remove(&sender_id);
+                        }
+                        self.broadcast_ready_count();
+                        return;
+                    }
+                    SyncMessage::ReadyCount { .. } => {}
                     SyncMessage::UserCount { .. } => {}
                 }
 
@@ -346,6 +381,10 @@ mod tests {
             serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
             SyncMessage::UserCount { count: 1 }
         );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 0 }
+        );
 
         // Client 1 sets playlist and plays URL
         state.process_message(1, r#"{"action":"playlist","urls":["v1.mp4","v2.mp4"]}"#);
@@ -353,7 +392,7 @@ mod tests {
         state.process_message(1, r#"{"action":"seek","position":15.0}"#);
         state.process_message(1, r#"{"action":"pause","state":false}"#);
 
-        // Register client 2 -> should receive user_count, playlist, play, seek, pause
+        // Register client 2 -> should receive user_count, ready_count, playlist, play, seek, pause
         state.register_client(2, tx2);
         assert_eq!(
             serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
@@ -362,6 +401,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
             SyncMessage::UserCount { count: 2 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 0 }
         );
         assert_eq!(
             serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
@@ -420,7 +463,8 @@ mod tests {
         let (tx2, mut rx2) = mpsc::unbounded_channel();
 
         state.register_client(1, tx1);
-        let _ = rx1.try_recv();
+        let _ = rx1.try_recv(); // user count
+        let _ = rx1.try_recv(); // ready count
 
         state.process_message(1, r#"{"action":"play","url":"movie.mp4"}"#);
         state.process_message(1, r#"{"action":"seek","position":120.0}"#);
@@ -429,6 +473,7 @@ mod tests {
         state.register_client(2, tx2);
         let _ = rx1.try_recv(); // user count
         let _ = rx2.try_recv(); // user count
+        let _ = rx2.try_recv(); // ready count
         let _ = rx2.try_recv(); // play
         let _ = rx2.try_recv(); // seek
         let _ = rx2.try_recv(); // pause
@@ -455,6 +500,10 @@ mod tests {
             serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
             SyncMessage::Pause { state: false }
         );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 0 }
+        );
 
         // Large drift (> 5.0) from a lagging client must not kick client 1 back to 0.0
         state.process_message(1, r#"{"action":"time_sync","position":155.0}"#);
@@ -467,6 +516,102 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
             SyncMessage::Seek { position: 155.0 }
+        );
+    }
+
+    #[test]
+    fn test_ready_counter_flow() {
+        let mut state = ServerState::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx3, mut rx3) = mpsc::unbounded_channel();
+
+        state.register_client(1, tx1);
+        let _ = rx1.try_recv(); // user count
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 0 }
+        );
+
+        state.register_client(2, tx2);
+        let _ = rx1.try_recv(); // user count
+        let _ = rx2.try_recv(); // user count
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 0 }
+        );
+
+        state.register_client(3, tx3);
+        let _ = rx1.try_recv(); // user count
+        let _ = rx2.try_recv(); // user count
+        let _ = rx3.try_recv(); // user count
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx3.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 0 }
+        );
+
+        // Client 1 clicks ready
+        state.process_message(1, r#"{"action":"ready","state":true}"#);
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 1 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 1 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx3.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 1 }
+        );
+
+        // Client 2 clicks ready
+        state.process_message(2, r#"{"action":"ready","state":true}"#);
+        let _ = rx1.try_recv();
+        let _ = rx2.try_recv();
+        let _ = rx3.try_recv();
+
+        // Client 3 clicks ready -> all 3 ready!
+        state.process_message(3, r#"{"action":"ready","state":true}"#);
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 3 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 3 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx3.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 3 }
+        );
+
+        // Client 3 un-readies
+        state.process_message(3, r#"{"action":"ready","state":false}"#);
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 2 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 2 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx3.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 2 }
+        );
+
+        // Client 2 disconnects -> ready count drops to 1
+        state.unregister_client(2);
+        let _ = rx1.try_recv(); // user count = 2
+        let _ = rx3.try_recv(); // user count = 2
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 1 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx3.try_recv().unwrap()).unwrap(),
+            SyncMessage::ReadyCount { count: 1 }
         );
     }
 }

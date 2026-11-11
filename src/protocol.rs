@@ -30,6 +30,13 @@ pub enum SyncMessage {
         position: f64,
     },
     RequestSync,
+    Ready {
+        #[serde(default)]
+        state: bool,
+    },
+    ReadyCount {
+        count: usize,
+    },
 }
 
 fn default_true() -> bool {
@@ -124,6 +131,16 @@ mod tests {
         let msg: SyncMessage = serde_json::from_str(req_json).unwrap();
         assert_eq!(msg, SyncMessage::RequestSync);
         assert_eq!(serde_json::to_string(&msg).unwrap(), req_json);
+
+        let ready_json = r#"{"action":"ready","state":true}"#;
+        let msg: SyncMessage = serde_json::from_str(ready_json).unwrap();
+        assert_eq!(msg, SyncMessage::Ready { state: true });
+        assert_eq!(serde_json::to_string(&msg).unwrap(), ready_json);
+
+        let ready_count_json = r#"{"action":"ready_count","count":3}"#;
+        let msg: SyncMessage = serde_json::from_str(ready_count_json).unwrap();
+        assert_eq!(msg, SyncMessage::ReadyCount { count: 3 });
+        assert_eq!(serde_json::to_string(&msg).unwrap(), ready_count_json);
     }
 
     #[test]
