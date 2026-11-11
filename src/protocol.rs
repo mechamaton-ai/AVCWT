@@ -29,6 +29,7 @@ pub enum SyncMessage {
         #[serde(default)]
         position: f64,
     },
+    RequestSync,
 }
 
 fn default_true() -> bool {
@@ -118,6 +119,11 @@ mod tests {
         let time_sync_json = r#"{"action":"time_sync","position":12.25}"#;
         let msg: SyncMessage = serde_json::from_str(time_sync_json).unwrap();
         assert_eq!(msg, SyncMessage::TimeSync { position: 12.25 });
+
+        let req_json = r#"{"action":"request_sync"}"#;
+        let msg: SyncMessage = serde_json::from_str(req_json).unwrap();
+        assert_eq!(msg, SyncMessage::RequestSync);
+        assert_eq!(serde_json::to_string(&msg).unwrap(), req_json);
     }
 
     #[test]

@@ -126,9 +126,12 @@ impl ServerState {
                         self.client_times.clear();
                     }
                     SyncMessage::TimeSync { position } => {
+                        if position < 0.0 {
+                            return;
+                        }
                         self.current_time = position;
                         self.client_times.insert(sender_id, position);
-                        if !self.client_times.is_empty() {
+                        if self.client_times.len() > 1 {
                             let min_time = self
                                 .client_times
                                 .values()
@@ -139,16 +142,61 @@ impl ServerState {
                                 .values()
                                 .copied()
                                 .fold(f64::NEG_INFINITY, f64::max);
-                            if max_time - min_time > 2.0 {
+                            let drift = max_time - min_time;
+                            if drift > 2.0 {
                                 self.client_times.clear();
-                                if let Ok(seek_msg) = serde_json::to_string(&SyncMessage::Seek {
-                                    position: min_time,
-                                }) {
-                                    self.broadcast_all(&seek_msg);
+                                if drift <= 5.0 {
+                                    // Minor drift between active players: sync everyone to min_time
+                                    if let Ok(seek_msg) = serde_json::to_string(&SyncMessage::Seek {
+                                        position: min_time,
+                                    }) {
+                                        self.broadcast_all(&seek_msg);
+                                    }
+                                } else {
+                                    // Large drift (e.g. reload or buffering): do not kick active players back to start!
+                                    // Sync only the lagging client(s) forward to max_time
+                                    if let Ok(seek_msg) = serde_json::to_string(&SyncMessage::Seek {
+                                        position: max_time,
+                                    }) {
+                                        for (&client_id, tx) in &self.clients {
+                                            if client_id == sender_id && position < max_time - 2.0 {
+                                                let _ = tx.send(seek_msg.clone());
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                         // Do not broadcast time_sync to avoid stuttering clients
+                        return;
+                    }
+                    SyncMessage::RequestSync => {
+                        let room_time = self
+                            .client_times
+                            .iter()
+                            .filter(|(&id, _)| id != sender_id)
+                            .map(|(_, &t)| t)
+                            .fold(self.current_time, f64::max);
+                        self.client_times.remove(&sender_id);
+                        if let Some(tx) = self.clients.get(&sender_id) {
+                            if let Some(ref url) = self.current_url {
+                                if let Ok(play_msg) =
+                                    serde_json::to_string(&SyncMessage::Play { url: url.clone() })
+                                {
+                                    let _ = tx.send(play_msg);
+                                }
+                                if let Ok(seek_msg) =
+                                    serde_json::to_string(&SyncMessage::Seek { position: room_time })
+                                {
+                                    let _ = tx.send(seek_msg);
+                                }
+                                if let Ok(pause_msg) =
+                                    serde_json::to_string(&SyncMessage::Pause { state: self.is_paused })
+                                {
+                                    let _ = tx.send(pause_msg);
+                                }
+                            }
+                        }
                         return;
                     }
                     SyncMessage::UserCount { .. } => {}
@@ -356,6 +404,63 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
             SyncMessage::Pause { state: true }
+        );
+    }
+
+    #[test]
+    fn test_request_sync_and_large_drift() {
+        let mut state = ServerState::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+
+        state.register_client(1, tx1);
+        let _ = rx1.try_recv();
+
+        state.process_message(1, r#"{"action":"play","url":"movie.mp4"}"#);
+        state.process_message(1, r#"{"action":"seek","position":120.0}"#);
+        state.process_message(1, r#"{"action":"pause","state":false}"#);
+
+        state.register_client(2, tx2);
+        let _ = rx1.try_recv(); // user count
+        let _ = rx2.try_recv(); // user count
+        let _ = rx2.try_recv(); // play
+        let _ = rx2.try_recv(); // seek
+        let _ = rx2.try_recv(); // pause
+
+        // Client 1 is playing ahead at 150.0
+        state.process_message(1, r#"{"action":"time_sync","position":150.0}"#);
+
+        // Client 2 requests sync during reload
+        state.process_message(2, r#"{"action":"request_sync"}"#);
+
+        // Client 1 should NOT receive anything
+        assert!(rx1.try_recv().is_err());
+
+        // Client 2 should receive current room time (150.0)
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::Play { url: "movie.mp4".to_string() }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::Seek { position: 150.0 }
+        );
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::Pause { state: false }
+        );
+
+        // Large drift (> 5.0) from a lagging client must not kick client 1 back to 0.0
+        state.process_message(1, r#"{"action":"time_sync","position":155.0}"#);
+        state.process_message(2, r#"{"action":"time_sync","position":0.0}"#);
+
+        // Client 1 should NOT be sought back to 0.0
+        assert!(rx1.try_recv().is_err());
+
+        // Only client 2 receives seek to catch up to max_time (155.0)
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx2.try_recv().unwrap()).unwrap(),
+            SyncMessage::Seek { position: 155.0 }
         );
     }
 }

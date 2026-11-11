@@ -348,24 +348,27 @@ impl SyncPlayApp {
                 p.set_volume(self.volume);
                 p.set_pause(true);
 
+                let has_url = resume_url.is_some();
                 if let Some(ref url) = resume_url {
                     p.play(url);
-                    if resume_time > 0.0 && !self.is_live {
-                        p.set_time_pos(resume_time);
-                    }
-                    if !resume_paused {
-                        p.set_pause(false);
-                    }
+                    check_is_live_async(url.clone(), self.live_check_tx.clone());
                 }
 
                 self.player = Some(p);
                 self.player_error = None;
-                self.video_loading = false;
-                self.pending_seek = None;
-                self.pending_pause = None;
+                self.video_loading = has_url;
+                self.pending_seek = if has_url { Some(resume_time) } else { None };
+                self.pending_pause = if has_url { Some(resume_paused) } else { None };
                 self.pending_pause_apply_at = None;
-                self.ignore_next_seek = false;
-                self.ignore_next_pause = false;
+                self.ignore_next_seek = true;
+                self.ignore_next_pause = true;
+                self.last_time_pos = None;
+                self.last_sync_time = resume_time;
+
+                if self.ws_client.is_running() {
+                    self.ws_client.send_message(SyncMessage::RequestSync);
+                }
+
                 info!("Player successfully reloaded and resumed");
             }
             Err(e) => {
@@ -535,10 +538,13 @@ impl SyncPlayApp {
                         self.playlist.push(url.clone());
                         self.selected_playlist_idx = Some(self.playlist.len() - 1);
                     }
-                    self.play_url(url, false);
+                    if self.current_playing_url.as_deref() != Some(&url) || self.player.is_none() {
+                        self.play_url(url, false);
+                    }
                 }
             }
             SyncMessage::TimeSync { .. } => {}
+            SyncMessage::RequestSync => {}
         }
     }
 
@@ -560,10 +566,16 @@ impl SyncPlayApp {
             if let Some(seek_pos) = self.pending_seek.take() {
                 if !self.is_live {
                     self.current_time = seek_pos;
+                    self.last_time_pos = Some(seek_pos);
+                    self.last_sync_time = seek_pos;
+                    self.ignore_next_seek = true;
                     if let Some(ref mut player) = self.player {
                         player.set_time_pos(seek_pos);
                     }
                 }
+            } else {
+                self.last_time_pos = Some(self.current_time);
+                self.last_sync_time = self.current_time;
             }
             self.pending_pause_apply_at = Some(Instant::now() + Duration::from_millis(300));
         }
@@ -587,8 +599,12 @@ impl SyncPlayApp {
     }
 
     fn on_mpv_time_pos(&mut self, value: f64) {
+        if self.video_loading {
+            self.complete_video_loading();
+            return;
+        }
+
         self.current_time = value;
-        self.complete_video_loading();
 
         if self.last_time_pos.is_none() {
             self.last_time_pos = Some(value);
@@ -599,6 +615,8 @@ impl SyncPlayApp {
                 if (value - last_pos).abs() > 1.5 {
                     if self.ignore_next_seek {
                         self.ignore_next_seek = false;
+                        self.last_time_pos = Some(value);
+                        return;
                     } else if self.ws_client.is_running() {
                         self.ws_client
                             .send_message(SyncMessage::Seek { position: value });
@@ -1454,5 +1472,30 @@ mod tests {
         app.handle_network_message(SyncMessage::Pause { state: false });
         assert_eq!(app.pending_seek, Some(33.5));
         assert_eq!(app.pending_pause, Some(false));
+    }
+
+    #[test]
+    fn test_reload_player_sync_state() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+        app.current_playing_url = Some("test.mp4".to_string());
+        app.current_time = 45.0;
+        app.is_paused = false;
+
+        app.reload_player();
+
+        // During reload, video_loading must be true, pending_seek must be preserved, and ignore_next_seek must be true
+        assert!(app.video_loading);
+        assert_eq!(app.pending_seek, Some(45.0));
+        assert_eq!(app.pending_pause, Some(false));
+        assert!(app.ignore_next_seek);
+
+        // When loading completes, pending_seek is applied and ignore_next_seek remains true to prevent seek broadcast
+        app.complete_video_loading();
+        assert!(!app.video_loading);
+        assert_eq!(app.current_time, 45.0);
+        assert!(app.ignore_next_seek);
     }
 }
