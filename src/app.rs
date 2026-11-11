@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use egui::{
     Align, Color32, Context, CursorIcon, Frame, Id, Key, Layout, Margin, Order, Pos2, Rect,
-    RichText, Rounding, Sense, Shape, Slider, Stroke, SystemTheme, TextureHandle, TextureOptions,
+    RichText, Rounding, Sense, Shape, Stroke, SystemTheme, TextureHandle, TextureOptions,
     Theme, ThemePreference, UiBuilder, Vec2, ViewportCommand,
 };
 use log::{info, warn};
@@ -901,10 +901,12 @@ impl SyncPlayApp {
 
                 ui.add_space(4.0);
                 ui.add_sized(
-                    [ui.available_width(), 28.0],
+                    [ui.available_width(), 30.0],
                     egui::TextEdit::singleline(&mut self.ip_input)
                         .hint_text("localhost:8765")
-                        .text_color(Color32::WHITE),
+                        .text_color(Color32::WHITE)
+                        .margin(Margin::symmetric(10.0, 6.0))
+                        .vertical_align(Align::Center),
                 );
 
                 ui.add_space(8.0);
@@ -1662,27 +1664,127 @@ impl SyncPlayApp {
                                         self.toggle_sidebar();
                                     }
 
-                                    // Volume button 🔊
-                                    let vol_icon = if self.volume <= 0.0 {
-                                        "🔇"
-                                    } else if self.volume < 50.0 {
-                                        "🔉"
+                                    // Volume button with modern vector speaker icon
+                                    let (vol_rect, vol_resp) = ui.allocate_exact_size(
+                                        Vec2::splat(30.0),
+                                        Sense::click(),
+                                    );
+                                    volume_btn_rect = Some(vol_rect);
+                                    if vol_resp.hovered() {
+                                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                    }
+                                    let vol_bg = if self.volume_popup_open {
+                                        Color32::from_rgba_unmultiplied(36, 60, 95, 240)
+                                    } else if vol_resp.hovered() {
+                                        Color32::from_rgba_unmultiplied(48, 48, 58, 220)
                                     } else {
-                                        "🔊"
+                                        Color32::from_rgba_unmultiplied(36, 36, 44, 180)
                                     };
-                                    let vol_btn = egui::Button::new(
-                                        RichText::new(vol_icon)
-                                            .size(14.0)
-                                            .color(Color32::from_rgb(215, 215, 225)),
-                                    )
-                                    .fill(Color32::from_rgba_unmultiplied(36, 36, 44, 180))
-                                    .stroke(Stroke::new(
-                                        1.0_f32,
-                                        Color32::from_rgba_unmultiplied(70, 70, 80, 150),
-                                    ))
-                                    .rounding(Rounding::same(8.0));
-                                    let vol_resp = ui.add_sized([30.0, 30.0], vol_btn);
-                                    volume_btn_rect = Some(vol_resp.rect);
+                                    let vol_stroke = if self.volume_popup_open {
+                                        Color32::from_rgba_unmultiplied(60, 140, 230, 200)
+                                    } else if vol_resp.hovered() {
+                                        Color32::from_rgba_unmultiplied(90, 90, 105, 180)
+                                    } else {
+                                        Color32::from_rgba_unmultiplied(70, 70, 80, 150)
+                                    };
+                                    ui.painter().rect_filled(vol_rect, Rounding::same(8.0), vol_bg);
+                                    ui.painter().rect_stroke(vol_rect, Rounding::same(8.0), Stroke::new(1.0_f32, vol_stroke));
+
+                                    let icon_color = if self.volume_popup_open || vol_resp.hovered() {
+                                        Color32::WHITE
+                                    } else {
+                                        Color32::from_rgb(215, 215, 225)
+                                    };
+                                    let vc = vol_rect.center();
+
+                                    if self.volume <= 0.0 {
+                                        // Speaker body
+                                        ui.painter().rect_filled(
+                                            Rect::from_min_max(Pos2::new(vc.x - 7.0, vc.y - 3.2), Pos2::new(vc.x - 3.5, vc.y + 3.2)),
+                                            Rounding::ZERO,
+                                            icon_color,
+                                        );
+                                        ui.painter().add(Shape::convex_polygon(
+                                            vec![
+                                                Pos2::new(vc.x - 3.5, vc.y - 3.2),
+                                                Pos2::new(vc.x + 0.5, vc.y - 6.2),
+                                                Pos2::new(vc.x + 0.5, vc.y + 6.2),
+                                                Pos2::new(vc.x - 3.5, vc.y + 3.2),
+                                            ],
+                                            icon_color,
+                                            Stroke::NONE,
+                                        ));
+                                        // Diagonal mute cross ✕
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 3.5, vc.y - 3.5), Pos2::new(vc.x + 8.0, vc.y + 3.5)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 8.0, vc.y - 3.5), Pos2::new(vc.x + 3.5, vc.y + 3.5)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                    } else if self.volume < 50.0 {
+                                        // Speaker body
+                                        ui.painter().rect_filled(
+                                            Rect::from_min_max(Pos2::new(vc.x - 6.5, vc.y - 3.2), Pos2::new(vc.x - 3.0, vc.y + 3.2)),
+                                            Rounding::ZERO,
+                                            icon_color,
+                                        );
+                                        ui.painter().add(Shape::convex_polygon(
+                                            vec![
+                                                Pos2::new(vc.x - 3.0, vc.y - 3.2),
+                                                Pos2::new(vc.x + 1.0, vc.y - 6.2),
+                                                Pos2::new(vc.x + 1.0, vc.y + 6.2),
+                                                Pos2::new(vc.x - 3.0, vc.y + 3.2),
+                                            ],
+                                            icon_color,
+                                            Stroke::NONE,
+                                        ));
+                                        // 1 sound wave arc
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 3.8, vc.y - 3.8), Pos2::new(vc.x + 5.5, vc.y)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 5.5, vc.y), Pos2::new(vc.x + 3.8, vc.y + 3.8)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                    } else {
+                                        // Speaker body
+                                        ui.painter().rect_filled(
+                                            Rect::from_min_max(Pos2::new(vc.x - 7.5, vc.y - 3.2), Pos2::new(vc.x - 4.0, vc.y + 3.2)),
+                                            Rounding::ZERO,
+                                            icon_color,
+                                        );
+                                        ui.painter().add(Shape::convex_polygon(
+                                            vec![
+                                                Pos2::new(vc.x - 4.0, vc.y - 3.2),
+                                                Pos2::new(vc.x - 0.2, vc.y - 6.2),
+                                                Pos2::new(vc.x - 0.2, vc.y + 6.2),
+                                                Pos2::new(vc.x - 4.0, vc.y + 3.2),
+                                            ],
+                                            icon_color,
+                                            Stroke::NONE,
+                                        ));
+                                        // 2 sound wave arcs
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 2.6, vc.y - 3.5), Pos2::new(vc.x + 4.4, vc.y)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 4.4, vc.y), Pos2::new(vc.x + 2.6, vc.y + 3.5)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 5.8, vc.y - 5.8), Pos2::new(vc.x + 8.2, vc.y)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                        ui.painter().line_segment(
+                                            [Pos2::new(vc.x + 8.2, vc.y), Pos2::new(vc.x + 5.8, vc.y + 5.8)],
+                                            Stroke::new(1.6_f32, icon_color),
+                                        );
+                                    }
+
                                     if vol_resp.clicked() {
                                         self.volume_popup_open = !self.volume_popup_open;
                                     }
@@ -1871,30 +1973,103 @@ impl SyncPlayApp {
         // Floating vertical Volume Popup above the volume button
         if self.volume_popup_open {
             if let Some(btn_rect) = volume_btn_rect {
-                let popup_pos = Pos2::new(btn_rect.center().x - 18.0, btn_rect.top() - 135.0);
+                let popup_w = 34.0;
+                let popup_h = 126.0;
+                let popup_pos = Pos2::new(
+                    btn_rect.center().x - popup_w / 2.0,
+                    btn_rect.top() - popup_h - 8.0,
+                );
                 egui::Area::new(Id::new("volume_popup_overlay"))
                     .order(Order::Tooltip)
                     .fixed_pos(popup_pos)
                     .show(ctx, |ui| {
                         Frame::none()
-                            .fill(Color32::from_rgba_unmultiplied(22, 22, 28, 245))
+                            .fill(Color32::from_rgba_unmultiplied(20, 20, 26, 245))
                             .stroke(Stroke::new(
                                 1.0_f32,
-                                Color32::from_rgba_unmultiplied(80, 80, 95, 200),
+                                Color32::from_rgba_unmultiplied(75, 75, 90, 200),
                             ))
-                            .rounding(Rounding::same(10.0))
-                            .inner_margin(Margin::same(8.0))
+                            .rounding(Rounding::same(12.0))
+                            .inner_margin(Margin::same(6.0))
                             .show(ui, |ui| {
-                                let mut vol = self.volume;
-                                let resp = ui.add(
-                                    Slider::new(&mut vol, 0.0..=100.0)
-                                        .vertical()
-                                        .show_value(false),
+                                let (slider_rect, slider_resp) = ui.allocate_exact_size(
+                                    Vec2::new(22.0, 114.0),
+                                    Sense::click_and_drag(),
                                 );
-                                if resp.changed() || resp.dragged() {
-                                    self.last_mouse_activity = Instant::now();
-                                    self.change_volume(vol);
+                                if slider_resp.hovered() || slider_resp.dragged() {
+                                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                                 }
+
+                                let track_top = slider_rect.top() + 8.0;
+                                let track_bottom = slider_rect.bottom() - 8.0;
+                                let track_height = track_bottom - track_top;
+                                let center_x = slider_rect.center().x;
+                                let track_w = 6.0;
+
+                                if slider_resp.clicked() || slider_resp.dragged() {
+                                    if let Some(pos) = slider_resp.interact_pointer_pos() {
+                                        let frac = ((track_bottom - pos.y) / track_height).clamp(0.0, 1.0);
+                                        self.last_mouse_activity = Instant::now();
+                                        self.change_volume((frac * 100.0) as f64);
+                                    }
+                                }
+
+                                // Scroll wheel on volume slider popup
+                                let scroll_y = ctx.input(|i| i.raw_scroll_delta.y);
+                                if slider_resp.hovered() && scroll_y.abs() > f32::EPSILON {
+                                    let step = if scroll_y.abs() >= 15.0 {
+                                        (scroll_y / 50.0).signum() * ((scroll_y.abs() / 50.0).max(1.0) * 5.0)
+                                    } else {
+                                        scroll_y * 0.1
+                                    };
+                                    self.last_mouse_activity = Instant::now();
+                                    self.change_volume(self.volume + step as f64);
+                                }
+
+                                let vol_frac = (self.volume / 100.0).clamp(0.0, 1.0) as f32;
+                                let thumb_y = track_bottom - vol_frac * track_height;
+
+                                // Background track (dark grey rail)
+                                let bg_track = Rect::from_min_max(
+                                    Pos2::new(center_x - track_w / 2.0, track_top),
+                                    Pos2::new(center_x + track_w / 2.0, track_bottom),
+                                );
+                                ui.painter().rect_filled(
+                                    bg_track,
+                                    Rounding::same(track_w / 2.0),
+                                    Color32::from_rgb(45, 45, 54),
+                                );
+
+                                // Active filled bar (BLUE matching theme)
+                                if vol_frac > 0.0 {
+                                    let active_track = Rect::from_min_max(
+                                        Pos2::new(center_x - track_w / 2.0, thumb_y),
+                                        Pos2::new(center_x + track_w / 2.0, track_bottom),
+                                    );
+                                    ui.painter().rect_filled(
+                                        active_track,
+                                        Rounding::same(track_w / 2.0),
+                                        Color32::from_rgb(42, 130, 218),
+                                    );
+                                }
+
+                                // Modern circular thumb
+                                let thumb_radius = if slider_resp.hovered() || slider_resp.dragged() { 7.5 } else { 6.5 };
+                                ui.painter().circle_filled(
+                                    Pos2::new(center_x, thumb_y),
+                                    thumb_radius + 2.5,
+                                    Color32::from_rgba_unmultiplied(42, 130, 218, 50),
+                                );
+                                ui.painter().circle_filled(
+                                    Pos2::new(center_x, thumb_y),
+                                    thumb_radius,
+                                    Color32::WHITE,
+                                );
+                                ui.painter().circle_stroke(
+                                    Pos2::new(center_x, thumb_y),
+                                    thumb_radius,
+                                    Stroke::new(1.5_f32, Color32::from_rgb(42, 130, 218)),
+                                );
                             });
                     });
             }
