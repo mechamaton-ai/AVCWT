@@ -1089,18 +1089,68 @@ impl SyncPlayApp {
                                     Color32::from_rgba_unmultiplied(22, 22, 26, 235),
                                 );
 
-                                // 2. Active blue fill from bottom up (clipped to capsule)
-                                if vol_frac > 0.0 {
-                                    let filled_h = pill_h * vol_frac;
-                                    let filled_rect = Rect::from_min_max(
-                                        Pos2::new(pill_rect.left(), pill_rect.bottom() - filled_h),
-                                        Pos2::new(pill_rect.right(), pill_rect.bottom()),
-                                    );
-                                    ui.painter().with_clip_rect(pill_rect).rect_filled(
-                                        filled_rect,
-                                        Rounding::ZERO,
+                                // 2. Active blue fill from bottom up (conforming to capsule shape)
+                                if vol_frac >= 0.999 {
+                                    ui.painter().rect_filled(
+                                        pill_rect,
+                                        Rounding::same(r),
                                         Color32::from_rgb(42, 130, 218),
                                     );
+                                } else if vol_frac > 0.005 {
+                                    let min_y = pill_rect.bottom() - pill_h * vol_frac;
+                                    let cx = pill_rect.center().x;
+                                    let top_cap_y = pill_rect.top() + r;
+                                    let bottom_cap_y = pill_rect.bottom() - r;
+
+                                    let mut capsule_pts = Vec::with_capacity(36);
+                                    capsule_pts.push(Pos2::new(cx + r, top_cap_y));
+                                    capsule_pts.push(Pos2::new(cx + r, bottom_cap_y));
+                                    let steps = 16;
+                                    for i in 1..=steps {
+                                        let theta = std::f32::consts::PI * (i as f32) / (steps as f32);
+                                        capsule_pts.push(Pos2::new(cx + r * theta.cos(), bottom_cap_y + r * theta.sin()));
+                                    }
+                                    capsule_pts.push(Pos2::new(cx - r, top_cap_y));
+                                    for i in 1..=steps {
+                                        let theta = std::f32::consts::PI + std::f32::consts::PI * (i as f32) / (steps as f32);
+                                        capsule_pts.push(Pos2::new(cx + r * theta.cos(), top_cap_y + r * theta.sin()));
+                                    }
+
+                                    // Sutherland-Hodgman clip against y >= min_y
+                                    let mut clipped_pts = Vec::new();
+                                    for i in 0..capsule_pts.len() {
+                                        let cur = capsule_pts[i];
+                                        let prev = if i == 0 { capsule_pts[capsule_pts.len() - 1] } else { capsule_pts[i - 1] };
+                                        let cur_in = cur.y >= min_y;
+                                        let prev_in = prev.y >= min_y;
+
+                                        if prev_in && cur_in {
+                                            clipped_pts.push(cur);
+                                        } else if prev_in && !cur_in {
+                                            let dy = cur.y - prev.y;
+                                            if dy.abs() > f32::EPSILON {
+                                                let t = (min_y - prev.y) / dy;
+                                                let x = prev.x + t * (cur.x - prev.x);
+                                                clipped_pts.push(Pos2::new(x, min_y));
+                                            }
+                                        } else if !prev_in && cur_in {
+                                            let dy = cur.y - prev.y;
+                                            if dy.abs() > f32::EPSILON {
+                                                let t = (min_y - prev.y) / dy;
+                                                let x = prev.x + t * (cur.x - prev.x);
+                                                clipped_pts.push(Pos2::new(x, min_y));
+                                            }
+                                            clipped_pts.push(cur);
+                                        }
+                                    }
+
+                                    if clipped_pts.len() >= 3 {
+                                        ui.painter().add(Shape::convex_polygon(
+                                            clipped_pts,
+                                            Color32::from_rgb(42, 130, 218),
+                                            Stroke::NONE,
+                                        ));
+                                    }
                                 }
 
                                 // 3. Capsule border stroke
