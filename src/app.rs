@@ -52,6 +52,7 @@ pub struct SyncPlayApp {
     last_mouse_activity: Instant,
     last_pointer_pos: Option<Pos2>,
     volume_popup_open: bool,
+    volume_indicator_until: Option<Instant>,
     settings_dialog_open: bool,
     edit_playlist_dialog_open: bool,
     edit_playlist_buffer: String,
@@ -129,6 +130,7 @@ impl SyncPlayApp {
             last_mouse_activity: Instant::now(),
             last_pointer_pos: None,
             volume_popup_open: false,
+            volume_indicator_until: None,
             settings_dialog_open: false,
             edit_playlist_dialog_open: false,
             edit_playlist_buffer: String::new(),
@@ -848,7 +850,8 @@ impl SyncPlayApp {
                             scroll_y * 0.1
                         };
                         self.change_volume(self.volume + step as f64);
-                        self.show_osc();
+                        self.volume_indicator_until = Some(Instant::now() + Duration::from_millis(1500));
+                        ctx.request_repaint();
                     }
                 }
 
@@ -920,6 +923,60 @@ impl SyncPlayApp {
 
                 if self.osc_visible {
                     self.render_osc_overlays(ctx, video_rect);
+                }
+
+                // Render floating volume indicator when scrolling wheel
+                if let Some(until) = self.volume_indicator_until {
+                    if Instant::now() < until {
+                        let center = video_rect.center();
+                        let vol_indicator_pos = Pos2::new(center.x - 70.0, center.y - 30.0);
+                        let vol_bg = Color32::from_rgba_unmultiplied(20, 20, 24, 220);
+                        let vol_stroke = Stroke::new(
+                            1.0_f32,
+                            Color32::from_rgba_unmultiplied(90, 90, 96, 200),
+                        );
+
+                        egui::Area::new(Id::new("scroll_volume_indicator_overlay"))
+                            .order(Order::Tooltip)
+                            .fixed_pos(vol_indicator_pos)
+                            .show(ctx, |ui| {
+                                Frame::none()
+                                    .fill(vol_bg)
+                                    .stroke(vol_stroke)
+                                    .rounding(Rounding::same(10.0))
+                                    .inner_margin(Margin::symmetric(14.0, 10.0))
+                                    .show(ui, |ui| {
+                                        ui.set_width(112.0);
+                                        ui.horizontal(|ui| {
+                                            let icon = if self.volume <= 0.0 {
+                                                "🔇"
+                                            } else if self.volume < 50.0 {
+                                                "🔉"
+                                            } else {
+                                                "🔊"
+                                            };
+                                            ui.label(RichText::new(icon).size(16.0));
+                                            ui.label(
+                                                RichText::new(format!("{:.0}%", self.volume))
+                                                    .strong()
+                                                    .size(15.0)
+                                                    .color(Color32::WHITE),
+                                            );
+                                        });
+                                        ui.add_space(4.0);
+                                        let vol_fraction = (self.volume as f32 / 100.0).clamp(0.0, 1.0);
+                                        ui.add(
+                                            egui::ProgressBar::new(vol_fraction)
+                                                .desired_height(6.0)
+                                                .desired_width(112.0)
+                                                .fill(Color32::from_rgb(42, 130, 218)),
+                                        );
+                                    });
+                            });
+                        ctx.request_repaint_after(Duration::from_millis(50));
+                    } else {
+                        self.volume_indicator_until = None;
+                    }
                 }
             });
     }
