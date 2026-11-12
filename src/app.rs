@@ -340,12 +340,7 @@ impl SyncPlayApp {
         self.selected_sub_idx = sub_idx;
     }
 
-    pub fn play_url(&mut self, url: String, broadcast: bool) {
-        let target_pause = if self.current_playing_url.is_none() {
-            false
-        } else {
-            self.is_paused
-        };
+    pub fn play_url_with_state(&mut self, url: String, broadcast: bool, target_pause: bool) {
         self.video_loading = true;
         self.is_live = false;
         self.media_title = None;
@@ -354,7 +349,7 @@ impl SyncPlayApp {
         self.last_time_pos = None;
         self.last_sync_time = 0.0;
         self.pending_seek = None;
-        self.is_paused = true;
+        self.is_paused = target_pause;
         self.pending_pause = Some(target_pause);
         self.pending_pause_apply_at = None;
 
@@ -368,8 +363,12 @@ impl SyncPlayApp {
 
         if broadcast && self.ws_client.is_running() {
             self.ws_client.send_message(SyncMessage::Play { url });
-            self.ws_client.send_message(SyncMessage::Pause { state: target_pause });
         }
+    }
+
+    pub fn play_url(&mut self, url: String, broadcast: bool) {
+        // Double-clicking or selecting a track reloads in a PLAY state (target_pause = false)
+        self.play_url_with_state(url, broadcast, false);
     }
 
     /// Re-initializes the underlying `libmpv` instance and reloads the current video or position.
@@ -626,7 +625,10 @@ impl SyncPlayApp {
                         self.awaiting_sync_reload = false;
                     } else {
                         self.awaiting_sync_reload = false;
-                        self.play_url(url, false);
+                        // Reload for this client: if this client is currently paused, ignore the play action and stay paused;
+                        // otherwise reload in a play state.
+                        let keep_paused = self.is_paused;
+                        self.play_url_with_state(url, false, keep_paused);
                     }
                 }
             }
@@ -2749,28 +2751,26 @@ mod tests {
             ..SyncPlayApp::new()
         };
 
-        // Initially watching a video at 45.0s, and the room is paused
+        // User A was paused at 45.0s
         app.current_playing_url = Some("movie.mp4".to_string());
         app.current_time = 45.0;
         app.is_paused = true;
 
-        // User double-clicks "movie.mp4" to reload the video
+        // User A double-clicks "movie.mp4" to reload:
+        // It must reload the video to 0.0s in a PLAY state (pending_pause = Some(false), is_paused = false)
         app.play_url("movie.mp4".to_string(), false);
 
-        // It must reload the video to 0.0s, and preserve the paused state (pending_pause = Some(true))
         assert!(app.video_loading);
         assert_eq!(app.current_time, 0.0);
-        assert_eq!(app.pending_pause, Some(true));
-        assert!(app.is_paused);
+        assert_eq!(app.pending_pause, Some(false));
+        assert!(!app.is_paused);
 
-        // When loading completes, it stays paused at 0.0s
+        // When loading completes, User A plays from 0.0s
         app.complete_video_loading();
         assert!(!app.video_loading);
         assert_eq!(app.current_time, 0.0);
-        assert!(app.is_paused);
 
-        // Now test when another client receives SyncMessage::Play for the currently-playing URL:
-        // Another client must also reload the video rather than ignoring the message
+        // Client B is paused at 45.0s
         let mut client_b = SyncPlayApp {
             player: None,
             ..SyncPlayApp::new()
@@ -2779,12 +2779,12 @@ mod tests {
         client_b.current_time = 45.0;
         client_b.is_paused = true;
 
+        // Client B receives the double-click reload broadcast:
+        // Client B must reload to 0.0s, but because Client B was paused, it ignores the play button and stays paused!
         client_b.handle_network_message(SyncMessage::Play {
             url: "movie.mp4".to_string(),
         });
-        client_b.handle_network_message(SyncMessage::Pause { state: true });
 
-        // Client B reloads to 0.0s and stays paused
         assert!(client_b.video_loading);
         assert_eq!(client_b.current_time, 0.0);
         assert_eq!(client_b.pending_pause, Some(true));
@@ -2794,5 +2794,22 @@ mod tests {
         assert!(!client_b.video_loading);
         assert_eq!(client_b.current_time, 0.0);
         assert!(client_b.is_paused);
+
+        // Client C was playing when the double-click happened:
+        let mut client_c = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+        client_c.current_playing_url = Some("movie.mp4".to_string());
+        client_c.current_time = 45.0;
+        client_c.is_paused = false;
+
+        // Client C reloads in a play state
+        client_c.handle_network_message(SyncMessage::Play {
+            url: "movie.mp4".to_string(),
+        });
+        assert!(client_c.video_loading);
+        assert_eq!(client_c.pending_pause, Some(false));
+        assert!(!client_c.is_paused);
     }
 }

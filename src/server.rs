@@ -140,6 +140,7 @@ impl ServerState {
                     SyncMessage::Play { url } => {
                         self.current_url = Some(url);
                         self.current_time = 0.0;
+                        self.is_paused = false;
                         self.client_times.clear();
                     }
                     SyncMessage::Playlist { urls } => {
