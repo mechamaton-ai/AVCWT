@@ -2009,14 +2009,13 @@ impl SyncPlayApp {
         // Floating Audio & Subtitle Popup above the pill button
         if self.audio_sub_popup_open {
             if let Some(btn_rect) = audio_sub_btn_rect {
-                let popup_w = 230.0;
-                let popup_pos = Pos2::new(
-                    (btn_rect.center().x - popup_w / 2.0)
-                        .clamp(video_rect.left() + 10.0, video_rect.right() - popup_w - 10.0),
-                    (btn_rect.top() - 210.0).max(video_rect.top() + 10.0),
-                );
+                let popup_w = 260.0;
+                let popup_x = (btn_rect.center().x - popup_w / 2.0)
+                    .clamp(video_rect.left() + 10.0, video_rect.right() - popup_w - 10.0);
+                let popup_pos = Pos2::new(popup_x, btn_rect.top() - 8.0);
                 egui::Area::new(Id::new("audio_sub_popup_overlay"))
                     .order(Order::Tooltip)
+                    .pivot(egui::Align2::LEFT_BOTTOM)
                     .fixed_pos(popup_pos)
                     .show(ctx, |ui| {
                         Frame::none()
@@ -2070,26 +2069,33 @@ impl SyncPlayApp {
                                             .color(Color32::GRAY),
                                     );
                                 } else {
-                                    for (idx, (track_id, label)) in
-                                        self.audio_tracks.iter().enumerate()
-                                    {
-                                        let is_sel = idx == self.selected_audio_idx;
-                                        let text = if is_sel {
-                                            RichText::new(label)
-                                                .strong()
-                                                .color(Color32::WHITE)
-                                        } else {
-                                            RichText::new(label)
-                                                .color(Color32::from_rgb(220, 220, 230))
-                                        };
-                                        let resp = ui.selectable_label(is_sel, text);
-                                        if resp.clicked() {
-                                            self.selected_audio_idx = idx;
-                                            if let Some(ref player) = self.player {
-                                                player.set_audio_track(*track_id);
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("audio_tracks_scroll")
+                                        .max_height(104.0)
+                                        .auto_shrink([false, true])
+                                        .show(ui, |ui| {
+                                            ui.set_width(ui.available_width());
+                                            for (idx, (track_id, label)) in
+                                                self.audio_tracks.iter().enumerate()
+                                            {
+                                                let is_sel = idx == self.selected_audio_idx;
+                                                let text = if is_sel {
+                                                    RichText::new(label)
+                                                        .strong()
+                                                        .color(Color32::WHITE)
+                                                } else {
+                                                    RichText::new(label)
+                                                        .color(Color32::from_rgb(220, 220, 230))
+                                                };
+                                                let resp = ui.selectable_label(is_sel, text);
+                                                if resp.clicked() {
+                                                    self.selected_audio_idx = idx;
+                                                    if let Some(ref player) = self.player {
+                                                        player.set_audio_track(*track_id);
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }
+                                        });
                                 }
 
                                 ui.add_space(8.0);
@@ -2110,26 +2116,33 @@ impl SyncPlayApp {
                                             .color(Color32::GRAY),
                                     );
                                 } else {
-                                    for (idx, (track_id, label)) in
-                                        self.sub_tracks.iter().enumerate()
-                                    {
-                                        let is_sel = idx == self.selected_sub_idx;
-                                        let text = if is_sel {
-                                            RichText::new(label)
-                                                .strong()
-                                                .color(Color32::WHITE)
-                                        } else {
-                                            RichText::new(label)
-                                                .color(Color32::from_rgb(220, 220, 230))
-                                        };
-                                        let resp = ui.selectable_label(is_sel, text);
-                                        if resp.clicked() {
-                                            self.selected_sub_idx = idx;
-                                            if let Some(ref player) = self.player {
-                                                player.set_subtitle_track(*track_id);
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("sub_tracks_scroll")
+                                        .max_height(104.0)
+                                        .auto_shrink([false, true])
+                                        .show(ui, |ui| {
+                                            ui.set_width(ui.available_width());
+                                            for (idx, (track_id, label)) in
+                                                self.sub_tracks.iter().enumerate()
+                                            {
+                                                let is_sel = idx == self.selected_sub_idx;
+                                                let text = if is_sel {
+                                                    RichText::new(label)
+                                                        .strong()
+                                                        .color(Color32::WHITE)
+                                                } else {
+                                                    RichText::new(label)
+                                                        .color(Color32::from_rgb(220, 220, 230))
+                                                };
+                                                let resp = ui.selectable_label(is_sel, text);
+                                                if resp.clicked() {
+                                                    self.selected_sub_idx = idx;
+                                                    if let Some(ref player) = self.player {
+                                                        player.set_subtitle_track(*track_id);
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }
+                                        });
                                 }
                             });
                     });
