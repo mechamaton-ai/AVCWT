@@ -795,7 +795,9 @@ impl SyncPlayApp {
                     }
                 }
                 MpvEvent::MouseMoved => {
-                    self.show_osc();
+                    if self.osc_visible {
+                        self.last_mouse_activity = Instant::now();
+                    }
                 }
                 MpvEvent::EofReached => self.play_next_item(),
             }
@@ -984,14 +986,14 @@ impl SyncPlayApp {
 
                 self.last_pointer_pos = pointer_pos;
 
-                if is_pointer_in_player && mouse_moved {
-                    self.show_osc();
-                    ctx.request_repaint();
+                // Mouse moving resets 5-second timer only while controls are ALREADY visible.
+                // When controls are hidden (after 5 seconds), mouse movement will NOT make them appear.
+                if is_pointer_in_player && mouse_moved && self.osc_visible {
+                    self.last_mouse_activity = Instant::now();
                 }
 
                 // Handle clicks anywhere in player window:
-                // 1. Closes Audio/CC and Volume windows when clicking outside them
-                // 2. Clicking anywhere on the player keeps controls active for 5 seconds
+                // Controls show ONLY when a user clicks on the player (active for 5 seconds)
                 let primary_clicked = ctx.input(|i| i.pointer.primary_clicked() || i.pointer.primary_released())
                     || response.clicked();
                 if primary_clicked && is_pointer_in_player {
