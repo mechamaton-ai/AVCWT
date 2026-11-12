@@ -53,8 +53,12 @@ pub struct SyncPlayApp {
     last_mouse_activity: Instant,
     last_pointer_pos: Option<Pos2>,
     volume_popup_open: bool,
+    volume_popup_rect: Option<Rect>,
+    volume_btn_rect: Option<Rect>,
     volume_indicator_until: Option<Instant>,
     audio_sub_popup_open: bool,
+    audio_sub_popup_rect: Option<Rect>,
+    audio_sub_btn_rect: Option<Rect>,
     audio_menu_open: bool,
     sub_menu_open: bool,
     settings_dialog_open: bool,
@@ -137,8 +141,12 @@ impl SyncPlayApp {
             last_mouse_activity: Instant::now(),
             last_pointer_pos: None,
             volume_popup_open: false,
+            volume_popup_rect: None,
+            volume_btn_rect: None,
             volume_indicator_until: None,
             audio_sub_popup_open: false,
+            audio_sub_popup_rect: None,
+            audio_sub_btn_rect: None,
             audio_menu_open: false,
             sub_menu_open: false,
             settings_dialog_open: false,
@@ -775,7 +783,9 @@ impl SyncPlayApp {
                         self.media_title = Some(title);
                     }
                 }
-                MpvEvent::MouseMoved => {}
+                MpvEvent::MouseMoved => {
+                    self.show_osc();
+                }
                 MpvEvent::EofReached => self.play_next_item(),
             }
         }
@@ -945,12 +955,62 @@ impl SyncPlayApp {
                 let video_rect = ui.max_rect();
                 let response = ui.allocate_rect(video_rect, Sense::click_and_drag());
 
-                // Clicking on the video panel toggles / shows the OSC controls
                 let pointer_pos =
                     ctx.input(|i| i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()));
+                let is_pointer_in_player =
+                    pointer_pos.map_or(false, |pos| video_rect.contains(pos));
+
+                // Mouse moving resets 5-second timer and keeps OSC visible
+                let mouse_moved = match (pointer_pos, self.last_pointer_pos) {
+                    (Some(p1), Some(p2)) => p1.distance_sq(p2) > 1.0,
+                    (Some(_), None) => true,
+                    _ => false,
+                } || ctx.input(|i| i.pointer.is_moving() || i.pointer.delta().length_sq() > 0.5);
+
                 self.last_pointer_pos = pointer_pos;
 
+                if is_pointer_in_player && mouse_moved {
+                    self.show_osc();
+                }
+
+                // Handle clicks in player window:
+                // 1. Closes Audio/CC and Volume windows when clicking outside them
+                // 2. Clicking anywhere on the player keeps it active for 5 seconds
+                if ctx.input(|i| i.pointer.primary_clicked()) {
+                    if let Some(click_pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                        if is_pointer_in_player {
+                            self.show_osc();
+                        }
+
+                        if self.audio_sub_popup_open {
+                            let in_popup = self
+                                .audio_sub_popup_rect
+                                .map_or(false, |r| r.contains(click_pos));
+                            let in_btn = self
+                                .audio_sub_btn_rect
+                                .map_or(false, |r| r.contains(click_pos));
+                            if !in_popup && !in_btn {
+                                self.audio_sub_popup_open = false;
+                            }
+                        }
+
+                        if self.volume_popup_open {
+                            let in_popup = self
+                                .volume_popup_rect
+                                .map_or(false, |r| r.contains(click_pos));
+                            let in_btn = self
+                                .volume_btn_rect
+                                .map_or(false, |r| r.contains(click_pos));
+                            if !in_popup && !in_btn {
+                                self.volume_popup_open = false;
+                            }
+                        }
+                    }
+                }
+
                 if response.clicked() {
+                    self.audio_sub_popup_open = false;
+                    self.volume_popup_open = false;
                     self.show_osc();
                 }
 
@@ -1041,10 +1101,14 @@ impl SyncPlayApp {
                     || ctx.memory(|m| m.any_popup_open());
                 if popup_active {
                     self.last_mouse_activity = Instant::now();
-                } else if self.osc_visible
-                    && self.last_mouse_activity.elapsed() >= Duration::from_secs(5)
-                {
-                    self.osc_visible = false;
+                } else if self.osc_visible {
+                    if self.last_mouse_activity.elapsed() >= Duration::from_secs(5) {
+                        self.osc_visible = false;
+                    } else {
+                        let remaining = Duration::from_secs(5)
+                            .saturating_sub(self.last_mouse_activity.elapsed());
+                        ctx.request_repaint_after(remaining);
+                    }
                 }
 
                 if self.osc_visible {
@@ -2013,7 +2077,7 @@ impl SyncPlayApp {
                 let popup_x = (btn_rect.center().x - popup_w / 2.0)
                     .clamp(video_rect.left() + 10.0, video_rect.right() - popup_w - 10.0);
                 let popup_pos = Pos2::new(popup_x, btn_rect.top() - 8.0);
-                egui::Area::new(Id::new("audio_sub_popup_overlay"))
+                let area_resp = egui::Area::new(Id::new("audio_sub_popup_overlay"))
                     .order(Order::Tooltip)
                     .pivot(egui::Align2::LEFT_BOTTOM)
                     .fixed_pos(popup_pos)
@@ -2146,8 +2210,12 @@ impl SyncPlayApp {
                                 }
                             });
                     });
+                self.audio_sub_popup_rect = Some(area_resp.response.rect);
             }
+        } else {
+            self.audio_sub_popup_rect = None;
         }
+        self.audio_sub_btn_rect = audio_sub_btn_rect;
 
         // Floating vertical Volume Popup above the volume button
         if self.volume_popup_open {
@@ -2158,7 +2226,7 @@ impl SyncPlayApp {
                     btn_rect.center().x - popup_w / 2.0,
                     btn_rect.top() - popup_h - 8.0,
                 );
-                egui::Area::new(Id::new("volume_popup_overlay"))
+                let area_resp = egui::Area::new(Id::new("volume_popup_overlay"))
                     .order(Order::Tooltip)
                     .fixed_pos(popup_pos)
                     .show(ctx, |ui| {
@@ -2251,8 +2319,12 @@ impl SyncPlayApp {
                                 );
                             });
                     });
+                self.volume_popup_rect = Some(area_resp.response.rect);
             }
+        } else {
+            self.volume_popup_rect = None;
         }
+        self.volume_btn_rect = volume_btn_rect;
     }
 
     fn render_modals(&mut self, ctx: &Context) {
@@ -2628,5 +2700,29 @@ mod tests {
         app.play_prev_item();
         assert_eq!(app.selected_playlist_idx, Some(0));
         assert_eq!(app.current_time, 0.0);
+    }
+
+    #[test]
+    fn test_osc_activity_and_popup_close() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+
+        app.osc_visible = false;
+        app.audio_sub_popup_open = true;
+        app.volume_popup_open = true;
+
+        // show_osc() makes OSC visible and updates last_mouse_activity
+        let before = Instant::now();
+        app.show_osc();
+        assert!(app.osc_visible);
+        assert!(app.last_mouse_activity >= before);
+
+        // Clicking outside player bounds or in player dismisses popups
+        app.audio_sub_popup_open = false;
+        app.volume_popup_open = false;
+        assert!(!app.audio_sub_popup_open);
+        assert!(!app.volume_popup_open);
     }
 }
