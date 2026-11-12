@@ -964,10 +964,14 @@ impl SyncPlayApp {
             .frame(Frame::none().fill(Color32::BLACK))
             .show(ctx, |ui| {
                 let video_rect = ui.max_rect();
-                let response = ui.allocate_rect(video_rect, Sense::click_and_drag());
+                let response = ui.allocate_rect(video_rect, Sense::click());
 
-                let pointer_pos =
-                    ctx.input(|i| i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()));
+                let pointer_pos = ctx.input(|i| {
+                    i.pointer
+                        .latest_pos()
+                        .or_else(|| i.pointer.hover_pos())
+                        .or_else(|| i.pointer.press_origin())
+                });
                 let is_pointer_in_player =
                     pointer_pos.map_or(false, |pos| video_rect.contains(pos));
 
@@ -982,17 +986,19 @@ impl SyncPlayApp {
 
                 if is_pointer_in_player && mouse_moved {
                     self.show_osc();
+                    ctx.request_repaint();
                 }
 
-                // Handle clicks in player window:
+                // Handle clicks anywhere in player window:
                 // 1. Closes Audio/CC and Volume windows when clicking outside them
-                // 2. Clicking anywhere on the player keeps it active for 5 seconds
-                if ctx.input(|i| i.pointer.primary_clicked()) {
-                    if let Some(click_pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                        if is_pointer_in_player {
-                            self.show_osc();
-                        }
+                // 2. Clicking anywhere on the player keeps controls active for 5 seconds
+                let primary_clicked = ctx.input(|i| i.pointer.primary_clicked() || i.pointer.primary_released())
+                    || response.clicked();
+                if primary_clicked && is_pointer_in_player {
+                    self.show_osc();
+                    ctx.request_repaint();
 
+                    if let Some(click_pos) = pointer_pos {
                         if self.audio_sub_popup_open {
                             let in_popup = self
                                 .audio_sub_popup_rect
@@ -1023,6 +1029,7 @@ impl SyncPlayApp {
                     self.audio_sub_popup_open = false;
                     self.volume_popup_open = false;
                     self.show_osc();
+                    ctx.request_repaint();
                 }
 
                 // Scroll wheel over the player controls audio volume
