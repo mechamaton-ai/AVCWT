@@ -139,6 +139,7 @@ impl ServerState {
                 match data {
                     SyncMessage::Play { url } => {
                         self.current_url = Some(url);
+                        self.current_time = 0.0;
                         self.client_times.clear();
                     }
                     SyncMessage::Playlist { urls } => {
