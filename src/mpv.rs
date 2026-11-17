@@ -16,9 +16,11 @@ const MPV_FORMAT_DOUBLE: c_int = 5;
 
 const MPV_EVENT_NONE: c_int = 0;
 const MPV_EVENT_END_FILE: c_int = 7;
+const MPV_EVENT_FILE_LOADED: c_int = 8;
 const MPV_EVENT_PROPERTY_CHANGE: c_int = 22;
 
 const MPV_END_FILE_REASON_EOF: c_int = 0;
+const MPV_END_FILE_REASON_ERROR: c_int = 4;
 
 const MPV_RENDER_PARAM_INVALID: c_int = 0;
 const MPV_RENDER_PARAM_API_TYPE: c_int = 1;
@@ -249,6 +251,9 @@ pub enum MpvEvent {
     DurationChanged(f64),
     CacheDurationChanged(f64),
     PauseChanged(bool),
+    BufferingChanged(bool),
+    FileLoaded,
+    PlaybackError,
     TrackListChanged(Vec<MediaTrack>),
     VideoAspectChanged(f64),
     MediaTitleChanged(String),
@@ -302,6 +307,11 @@ impl MpvPlayer {
             set_opt("input-vo-keyboard", "yes");
             set_opt("osc", "no");
             set_opt("cache", "yes");
+            set_opt("keep-open", "yes");
+            set_opt(
+                "demuxer-lavf-o",
+                "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5",
+            );
             set_opt("ytdl", "yes");
             set_opt("script-opts", "ytdl_hook-ytdl_path=yt-dlp");
             set_opt(
@@ -371,6 +381,8 @@ impl MpvPlayer {
             observe(9, "dwidth", MPV_FORMAT_INT64);
             observe(10, "dheight", MPV_FORMAT_INT64);
             observe(11, "media-title", MPV_FORMAT_STRING);
+            observe(12, "paused-for-cache", MPV_FORMAT_FLAG);
+            observe(13, "eof-reached", MPV_FORMAT_FLAG);
 
             Ok(Self {
                 api,
@@ -595,6 +607,14 @@ impl MpvPlayer {
         self.get_property_string("media-title")
     }
 
+    pub fn is_idle(&self) -> bool {
+        self.get_property_bool("idle-active").unwrap_or(false)
+    }
+
+    pub fn is_eof_reached(&self) -> bool {
+        self.get_property_bool("eof-reached").unwrap_or(false)
+    }
+
     fn read_track_list(&self) -> Vec<MediaTrack> {
         let count = self.get_property_i64("track-list/count").unwrap_or(0);
         let mut tracks = Vec::new();
@@ -700,14 +720,33 @@ impl MpvPlayer {
                                     out.push(MpvEvent::MediaTitleChanged(s));
                                 }
                             }
+                            "paused-for-cache"
+                                if prop.format == MPV_FORMAT_FLAG && !prop.data.is_null() =>
+                            {
+                                let flag = unsafe { *(prop.data as *const c_int) != 0 };
+                                out.push(MpvEvent::BufferingChanged(flag));
+                            }
+                            "eof-reached"
+                                if prop.format == MPV_FORMAT_FLAG && !prop.data.is_null() =>
+                            {
+                                let flag = unsafe { *(prop.data as *const c_int) != 0 };
+                                if flag {
+                                    out.push(MpvEvent::EofReached);
+                                }
+                            }
                             _ => {}
                         }
                     }
+                }
+                MPV_EVENT_FILE_LOADED => {
+                    out.push(MpvEvent::FileLoaded);
                 }
                 MPV_EVENT_END_FILE if !ev.data.is_null() => {
                     let end_file = unsafe { &*(ev.data as *const MpvEventEndFileRaw) };
                     if end_file.reason == MPV_END_FILE_REASON_EOF {
                         out.push(MpvEvent::EofReached);
+                    } else if end_file.reason == MPV_END_FILE_REASON_ERROR {
+                        out.push(MpvEvent::PlaybackError);
                     }
                 }
                 _ => {}

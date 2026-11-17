@@ -148,6 +148,7 @@ impl ServerState {
                     }
                     SyncMessage::Pause { state } => {
                         self.is_paused = state;
+                        self.client_times.clear();
                     }
                     SyncMessage::Seek { position } => {
                         self.current_time = position;

@@ -84,6 +84,7 @@ pub struct SyncPlayApp {
     pending_pause: Option<bool>,
     pending_pause_apply_at: Option<Instant>,
     video_loading: bool,
+    is_buffering: bool,
     last_time_pos: Option<f64>,
     last_sync_time: f64,
     awaiting_sync_reload: bool,
@@ -171,6 +172,7 @@ impl SyncPlayApp {
             pending_pause: None,
             pending_pause_apply_at: None,
             video_loading: false,
+            is_buffering: false,
             last_time_pos: None,
             last_sync_time: 0.0,
             awaiting_sync_reload: false,
@@ -251,12 +253,78 @@ impl SyncPlayApp {
     }
 
     fn toggle_playback(&mut self) {
+        if self.video_loading {
+            self.video_loading = false;
+            self.pending_pause = None;
+            self.pending_pause_apply_at = None;
+        }
+        self.is_buffering = false;
+
         let next = !self.is_paused;
         self.is_paused = next;
+
+        let (is_idle, is_eof, mpv_already_matches) = self
+            .player
+            .as_ref()
+            .map(|p| (p.is_idle(), p.is_eof_reached(), p.pause == next))
+            .unwrap_or((false, false, false));
+
+        if is_idle {
+            if let Some(url) = self.current_playing_url.clone() {
+                let resume_time = if self.current_duration > 0.0
+                    && self.current_time + 2.0 >= self.current_duration
+                {
+                    0.0
+                } else {
+                    self.current_time
+                };
+                self.recover_stream(&url, resume_time, next);
+                if self.ws_client.is_running() {
+                    self.ws_client
+                        .send_message(SyncMessage::Pause { state: next });
+                }
+                return;
+            }
+        }
+
         if let Some(ref mut player) = self.player {
+            if !next && is_eof {
+                player.set_time_pos(0.0);
+            }
             player.set_pause(next);
+            if mpv_already_matches {
+                self.ignore_next_pause = false;
+                if self.ws_client.is_running() {
+                    self.ws_client
+                        .send_message(SyncMessage::Pause { state: next });
+                }
+            }
         } else {
             self.on_mpv_pause(next);
+        }
+    }
+
+    fn recover_stream(&mut self, url: &str, resume_time: f64, target_pause: bool) {
+        info!(
+            "Recovering stream {} at {:.1}s (paused={})",
+            url, resume_time, target_pause
+        );
+        self.video_loading = true;
+        self.is_buffering = false;
+        self.pending_seek = if !self.is_live && resume_time > 0.0 {
+            Some(resume_time)
+        } else {
+            None
+        };
+        self.pending_pause = Some(target_pause);
+        self.pending_pause_apply_at = None;
+        self.is_paused = target_pause;
+        self.ignore_next_seek = true;
+        self.ignore_next_pause = true;
+
+        if let Some(ref mut player) = self.player {
+            player.set_pause(true);
+            player.play(url);
         }
     }
 
@@ -342,6 +410,7 @@ impl SyncPlayApp {
 
     pub fn play_url(&mut self, url: String, broadcast: bool) {
         self.video_loading = true;
+        self.is_buffering = false;
         self.is_live = false;
         self.media_title = None;
         self.current_playing_url = Some(url.clone());
@@ -582,10 +651,14 @@ impl SyncPlayApp {
                 if self.video_loading {
                     self.pending_pause = Some(state);
                     self.is_paused = state;
-                } else if self.is_paused != state {
-                    self.ignore_next_pause = true;
+                } else {
+                    self.pending_pause = None;
+                    self.pending_pause_apply_at = None;
                     self.is_paused = state;
                     if let Some(ref mut player) = self.player {
+                        if player.pause != state {
+                            self.ignore_next_pause = true;
+                        }
                         player.set_pause(state);
                     }
                 }
@@ -596,6 +669,8 @@ impl SyncPlayApp {
                 } else if !self.is_live && (self.current_time - position).abs() > 1.0 {
                     self.ignore_next_seek = true;
                     self.current_time = position;
+                    self.last_time_pos = Some(position);
+                    self.last_sync_time = position;
                     if let Some(ref mut player) = self.player {
                         player.set_time_pos(position);
                     }
@@ -649,6 +724,69 @@ impl SyncPlayApp {
         }
     }
 
+    fn on_mpv_buffering(&mut self, buffering: bool) {
+        self.is_buffering = buffering;
+        if buffering && !self.video_loading && !self.is_paused {
+            info!("Player is buffering (paused-for-cache); pausing everyone in room");
+            self.is_paused = true;
+            self.pending_pause = None;
+            self.pending_pause_apply_at = None;
+            if let Some(ref mut player) = self.player {
+                if !player.pause {
+                    self.ignore_next_pause = true;
+                }
+                player.set_pause(true);
+            }
+            if self.ws_client.is_running() {
+                self.ws_client
+                    .send_message(SyncMessage::Pause { state: true });
+                if !self.is_live && self.current_time > 0.0 {
+                    self.ws_client.send_message(SyncMessage::Seek {
+                        position: self.current_time,
+                    });
+                }
+            }
+        }
+    }
+
+    fn on_mpv_playback_error(&mut self) {
+        if let Some(url) = self.current_playing_url.clone() {
+            warn!(
+                "MPV reported playback error on {}; pausing room and recovering stream",
+                url
+            );
+            let was_playing = !self.is_paused;
+            self.recover_stream(&url, self.current_time, true);
+            if was_playing && self.ws_client.is_running() {
+                self.ws_client
+                    .send_message(SyncMessage::Pause { state: true });
+            }
+        }
+    }
+
+    fn on_mpv_eof_reached(&mut self) {
+        if !self.is_live
+            && self.current_duration > 10.0
+            && self.current_time > 1.0
+            && self.current_time + 5.0 < self.current_duration
+        {
+            if let Some(url) = self.current_playing_url.clone() {
+                warn!(
+                    "Premature EOF at {:.1}s / {:.1}s on {}; recovering stream",
+                    self.current_time, self.current_duration, url
+                );
+                let was_playing = !self.is_paused;
+                self.recover_stream(&url, self.current_time, true);
+                if was_playing && self.ws_client.is_running() {
+                    self.ws_client
+                        .send_message(SyncMessage::Pause { state: true });
+                }
+                return;
+            }
+        }
+        self.play_next_item();
+    }
+
     fn complete_video_loading(&mut self) {
         if self.video_loading {
             self.video_loading = false;
@@ -677,9 +815,11 @@ impl SyncPlayApp {
 
     fn apply_pending_pause(&mut self) {
         if let Some(target_pause) = self.pending_pause.take() {
-            self.ignore_next_pause = true;
             self.is_paused = target_pause;
             if let Some(ref mut player) = self.player {
+                if player.pause != target_pause {
+                    self.ignore_next_pause = true;
+                }
                 player.set_pause(target_pause);
             }
         }
@@ -778,6 +918,9 @@ impl SyncPlayApp {
         for ev in mpv_events {
             match ev {
                 MpvEvent::PauseChanged(paused) => self.on_mpv_pause(paused),
+                MpvEvent::BufferingChanged(buffering) => self.on_mpv_buffering(buffering),
+                MpvEvent::FileLoaded => self.complete_video_loading(),
+                MpvEvent::PlaybackError => self.on_mpv_playback_error(),
                 MpvEvent::TimePosChanged(pos) => self.on_mpv_time_pos(pos),
                 MpvEvent::DurationChanged(dur) => self.on_mpv_duration(dur),
                 MpvEvent::CacheDurationChanged(cache_dur) => {
@@ -799,7 +942,7 @@ impl SyncPlayApp {
                         self.last_mouse_activity = Instant::now();
                     }
                 }
-                MpvEvent::EofReached => self.play_next_item(),
+                MpvEvent::EofReached => self.on_mpv_eof_reached(),
             }
         }
     }
@@ -2796,5 +2939,40 @@ mod tests {
         assert!(!client_b.video_loading);
         assert_eq!(client_b.current_time, 0.0);
         assert!(!client_b.is_paused);
+    }
+
+    #[test]
+    fn test_buffering_pauses_room_and_recovers_stream() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+
+        app.playlist = vec!["ep1.mp4".to_string(), "ep2.mp4".to_string()];
+        app.selected_playlist_idx = Some(0);
+        app.current_playing_url = Some("ep1.mp4".to_string());
+        app.current_duration = 120.0;
+        app.current_time = 35.0;
+        app.video_loading = false;
+        app.is_paused = false;
+
+        // When buffering starts during active playback, it immediately pauses playback
+        app.on_mpv_buffering(true);
+        assert!(app.is_buffering);
+        assert!(app.is_paused);
+
+        // Premature EOF mid-video (e.g. at 35s / 120s) recovers stream at 35s instead of skipping to ep2.mp4
+        app.is_paused = false;
+        app.on_mpv_eof_reached();
+        assert_eq!(app.current_playing_url.as_deref(), Some("ep1.mp4"));
+        assert!(app.video_loading);
+        assert_eq!(app.pending_seek, Some(35.0));
+        assert_eq!(app.pending_pause, Some(true));
+        assert!(app.is_paused);
+
+        // Clicking Play/Pause while video_loading is true is never ignored
+        app.toggle_playback();
+        assert!(!app.video_loading);
+        assert!(!app.is_paused);
     }
 }
