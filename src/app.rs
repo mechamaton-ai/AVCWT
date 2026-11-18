@@ -1220,7 +1220,6 @@ impl SyncPlayApp {
                     self.audio_sub_popup_open = false;
                     self.volume_popup_open = false;
                     self.toggle_mute();
-                    self.show_osc();
                     self.volume_indicator_until = Some(Instant::now() + Duration::from_millis(1500));
                     ctx.request_repaint();
                 }
