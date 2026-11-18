@@ -60,6 +60,9 @@ pub struct SyncPlayApp {
     audio_sub_popup_open: bool,
     audio_sub_popup_rect: Option<Rect>,
     audio_sub_btn_rect: Option<Rect>,
+    viewers_popup_open: bool,
+    viewers_popup_rect: Option<Rect>,
+    viewers_btn_rect: Option<Rect>,
     audio_menu_open: bool,
     sub_menu_open: bool,
     settings_dialog_open: bool,
@@ -70,6 +73,7 @@ pub struct SyncPlayApp {
     ip_input: String,
     current_cache_size: i64,
     viewers_count: usize,
+    viewer_paused_states: Vec<bool>,
     is_ready: bool,
     ready_count: usize,
     conn_state: ConnectionUiState,
@@ -151,6 +155,9 @@ impl SyncPlayApp {
             audio_sub_popup_open: false,
             audio_sub_popup_rect: None,
             audio_sub_btn_rect: None,
+            viewers_popup_open: false,
+            viewers_popup_rect: None,
+            viewers_btn_rect: None,
             audio_menu_open: false,
             sub_menu_open: false,
             settings_dialog_open: false,
@@ -160,6 +167,7 @@ impl SyncPlayApp {
             ip_input: saved.host_address,
             current_cache_size: saved.cache_size,
             viewers_count: 0,
+            viewer_paused_states: Vec::new(),
             is_ready: false,
             ready_count: 0,
             conn_state: ConnectionUiState::Disconnected,
@@ -284,6 +292,8 @@ impl SyncPlayApp {
                 if self.ws_client.is_running() {
                     self.ws_client
                         .send_message(SyncMessage::Pause { state: next });
+                    self.ws_client
+                        .send_message(SyncMessage::ViewerStatus { paused: next });
                 }
                 return;
             }
@@ -299,6 +309,8 @@ impl SyncPlayApp {
                 if self.ws_client.is_running() {
                     self.ws_client
                         .send_message(SyncMessage::Pause { state: next });
+                    self.ws_client
+                        .send_message(SyncMessage::ViewerStatus { paused: next });
                 }
             }
         } else {
@@ -458,6 +470,13 @@ impl SyncPlayApp {
         if broadcast && self.ws_client.is_running() {
             self.ws_client.send_message(SyncMessage::Play { url });
             self.ws_client.send_message(SyncMessage::Pause { state: false });
+        }
+        for p in &mut self.viewer_paused_states {
+            *p = false;
+        }
+        if self.ws_client.is_running() {
+            self.ws_client
+                .send_message(SyncMessage::ViewerStatus { paused: false });
         }
     }
 
@@ -635,6 +654,9 @@ impl SyncPlayApp {
         self.ws_client.set_running(connected);
         if connected {
             self.conn_state = ConnectionUiState::Connected;
+            self.ws_client.send_message(SyncMessage::ViewerStatus {
+                paused: self.is_paused,
+            });
             if self.is_ready {
                 self.ws_client
                     .send_message(SyncMessage::Ready { state: true });
@@ -656,6 +678,7 @@ impl SyncPlayApp {
             }
         } else {
             self.conn_state = ConnectionUiState::Disconnected;
+            self.viewer_paused_states.clear();
             self.ready_count = if self.is_ready { 1 } else { 0 };
             if !self.is_paused {
                 self.ignore_next_pause = true;
@@ -671,6 +694,7 @@ impl SyncPlayApp {
         match msg {
             SyncMessage::UserCount { count } => {
                 self.viewers_count = count;
+                self.viewer_paused_states.resize(count, self.is_paused);
             }
             SyncMessage::Pause { state } => {
                 if self.video_loading {
@@ -686,6 +710,13 @@ impl SyncPlayApp {
                         }
                         player.set_pause(state);
                     }
+                }
+                for p in &mut self.viewer_paused_states {
+                    *p = state;
+                }
+                if self.ws_client.is_running() {
+                    self.ws_client
+                        .send_message(SyncMessage::ViewerStatus { paused: state });
                 }
             }
             SyncMessage::Seek { position } => {
@@ -731,6 +762,10 @@ impl SyncPlayApp {
             SyncMessage::ReadyCount { count } => {
                 self.ready_count = count;
             }
+            SyncMessage::ViewerStatus { .. } => {}
+            SyncMessage::ViewerStates { paused } => {
+                self.viewer_paused_states = paused;
+            }
         }
     }
 
@@ -739,6 +774,10 @@ impl SyncPlayApp {
             return;
         }
         self.is_paused = value;
+        if self.ws_client.is_running() {
+            self.ws_client
+                .send_message(SyncMessage::ViewerStatus { paused: value });
+        }
         if self.ignore_next_pause {
             self.ignore_next_pause = false;
             return;
@@ -765,6 +804,8 @@ impl SyncPlayApp {
             if self.ws_client.is_running() {
                 self.ws_client
                     .send_message(SyncMessage::Pause { state: true });
+                self.ws_client
+                    .send_message(SyncMessage::ViewerStatus { paused: true });
                 if !self.is_live && self.current_time > 0.0 {
                     self.ws_client.send_message(SyncMessage::Seek {
                         position: self.current_time,
@@ -785,6 +826,8 @@ impl SyncPlayApp {
             if was_playing && self.ws_client.is_running() {
                 self.ws_client
                     .send_message(SyncMessage::Pause { state: true });
+                self.ws_client
+                    .send_message(SyncMessage::ViewerStatus { paused: true });
             }
         }
     }
@@ -805,6 +848,8 @@ impl SyncPlayApp {
                 if was_playing && self.ws_client.is_running() {
                     self.ws_client
                         .send_message(SyncMessage::Pause { state: true });
+                    self.ws_client
+                        .send_message(SyncMessage::ViewerStatus { paused: true });
                 }
                 return;
             }
@@ -846,6 +891,11 @@ impl SyncPlayApp {
                     self.ignore_next_pause = true;
                 }
                 player.set_pause(target_pause);
+            }
+            if self.ws_client.is_running() {
+                self.ws_client.send_message(SyncMessage::ViewerStatus {
+                    paused: target_pause,
+                });
             }
         }
     }
@@ -1080,15 +1130,7 @@ impl SyncPlayApp {
                 }
 
                 ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Host Info").strong().color(Color32::WHITE));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("Viewers: {}", self.viewers_count))
-                                .color(Color32::from_rgb(200, 200, 205)),
-                        );
-                    });
-                });
+                ui.label(RichText::new("Host Info").strong().color(Color32::WHITE));
 
                 ui.add_space(4.0);
                 ui.add_sized(
@@ -1192,12 +1234,25 @@ impl SyncPlayApp {
                                 self.volume_popup_open = false;
                             }
                         }
+
+                        if self.viewers_popup_open {
+                            let in_popup = self
+                                .viewers_popup_rect
+                                .map_or(false, |r| r.contains(click_pos));
+                            let in_btn = self
+                                .viewers_btn_rect
+                                .map_or(false, |r| r.contains(click_pos));
+                            if !in_popup && !in_btn {
+                                self.viewers_popup_open = false;
+                            }
+                        }
                     }
                 }
 
                 if response.clicked() {
                     self.audio_sub_popup_open = false;
                     self.volume_popup_open = false;
+                    self.viewers_popup_open = false;
                     self.show_osc();
                     ctx.request_repaint();
                 }
@@ -1219,6 +1274,7 @@ impl SyncPlayApp {
                 if middle_clicked && (is_pointer_in_player || pointer_pos.is_none()) {
                     self.audio_sub_popup_open = false;
                     self.volume_popup_open = false;
+                    self.viewers_popup_open = false;
                     self.toggle_mute();
                     self.volume_indicator_until = Some(Instant::now() + Duration::from_millis(1500));
                     ctx.request_repaint();
@@ -1229,6 +1285,7 @@ impl SyncPlayApp {
                     || self.sub_menu_open
                     || self.audio_sub_popup_open
                     || self.volume_popup_open
+                    || self.viewers_popup_open
                     || ctx.memory(|m| m.any_popup_open());
                 if !self.settings_dialog_open
                     && !self.edit_playlist_dialog_open
@@ -1306,6 +1363,7 @@ impl SyncPlayApp {
                 // Check 5-second OSC auto-hide timer
                 let popup_active = self.volume_popup_open
                     || self.audio_sub_popup_open
+                    || self.viewers_popup_open
                     || self.audio_menu_open
                     || self.sub_menu_open
                     || ctx.memory(|m| m.any_popup_open());
@@ -1637,6 +1695,21 @@ impl SyncPlayApp {
         "Audio/CC".to_string()
     }
 
+    fn get_viewer_status_list(&self) -> Vec<(String, bool)> {
+        let count = self.viewers_count.max(self.viewer_paused_states.len());
+        (0..count)
+            .map(|idx| {
+                let is_paused = self
+                    .viewer_paused_states
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(self.is_paused);
+                let state_str = if is_paused { "Paused" } else { "Playing" };
+                (format!("Viewer {}: {}", idx + 1, state_str), is_paused)
+            })
+            .collect()
+    }
+
     fn render_osc_overlays(&mut self, ctx: &Context, video_rect: Rect) {
         let margin = 20.0;
         let osc_width = (video_rect.width() - margin * 2.0).max(120.0);
@@ -1647,8 +1720,9 @@ impl SyncPlayApp {
             Color32::from_rgba_unmultiplied(65, 65, 78, 180),
         );
 
-        // Top OSC Bar: Cache duration display
+        // Top OSC Bar: Cache duration display & clickable Viewers pill
         let top_pos = Pos2::new(video_rect.left() + margin, video_rect.top() + margin);
+        let mut viewers_btn_rect = None;
         egui::Area::new(Id::new("top_osc_overlay"))
             .order(Order::Middle)
             .fixed_pos(top_pos)
@@ -1670,6 +1744,106 @@ impl SyncPlayApp {
                             ui.label(RichText::new(cache_text).color(Color32::WHITE));
 
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let (vw_rect, vw_resp) = ui.allocate_exact_size(
+                                    Vec2::new(88.0, 26.0),
+                                    Sense::click(),
+                                );
+                                viewers_btn_rect = Some(vw_rect);
+                                if vw_resp.hovered() {
+                                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                }
+                                let vw_bg = if vw_resp.hovered() || self.viewers_popup_open {
+                                    Color32::from_rgba_unmultiplied(36, 60, 95, 240)
+                                } else {
+                                    Color32::from_rgba_unmultiplied(36, 36, 44, 220)
+                                };
+                                ui.painter().rect_filled(
+                                    vw_rect,
+                                    Rounding::same(13.0),
+                                    vw_bg,
+                                );
+                                ui.painter().rect_stroke(
+                                    vw_rect,
+                                    Rounding::same(13.0),
+                                    Stroke::new(
+                                        1.0_f32,
+                                        if self.viewers_popup_open {
+                                            Color32::from_rgba_unmultiplied(60, 140, 230, 200)
+                                        } else {
+                                            Color32::from_rgba_unmultiplied(75, 75, 88, 180)
+                                        },
+                                    ),
+                                );
+                                ui.painter().text(
+                                    vw_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    format!("Viewers: {}", self.viewers_count),
+                                    egui::FontId::proportional(12.5),
+                                    Color32::from_rgb(225, 225, 235),
+                                );
+                                if vw_resp.clicked() {
+                                    self.viewers_popup_open = !self.viewers_popup_open;
+                                }
+                            });
+                        });
+                    });
+            });
+
+        // Floating Viewers Popup below the top-right Viewers pill button
+        if self.viewers_popup_open {
+            if let Some(btn_rect) = viewers_btn_rect {
+                let popup_w = 220.0;
+                let popup_x = (btn_rect.right() - popup_w)
+                    .clamp(video_rect.left() + 10.0, video_rect.right() - popup_w - 10.0);
+                let popup_pos = Pos2::new(popup_x, btn_rect.bottom() + 12.0);
+                let area_resp = egui::Area::new(Id::new("viewers_popup_overlay"))
+                    .order(Order::Tooltip)
+                    .pivot(egui::Align2::LEFT_TOP)
+                    .fixed_pos(popup_pos)
+                    .show(ctx, |ui| {
+                        Frame::none()
+                            .fill(Color32::from_rgba_unmultiplied(22, 22, 28, 245))
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                Color32::from_rgba_unmultiplied(80, 80, 95, 200),
+                            ))
+                            .rounding(Rounding::same(12.0))
+                            .inner_margin(Margin::same(12.0))
+                            .show(ui, |ui| {
+                                ui.set_width(popup_w);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Viewers")
+                                            .strong()
+                                            .size(13.0)
+                                            .color(Color32::WHITE),
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if ui
+                                            .add(
+                                                egui::Button::new(
+                                                    RichText::new("X")
+                                                        .size(11.0)
+                                                        .color(Color32::from_rgb(160, 160, 175)),
+                                                )
+                                                .frame(false),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.viewers_popup_open = false;
+                                        }
+                                    });
+                                });
+                                ui.add_space(6.0);
+                                ui.separator();
+                                ui.add_space(6.0);
+
+                                ui.label(
+                                    RichText::new("Ready")
+                                        .strong()
+                                        .size(11.5)
+                                        .color(Color32::from_rgb(180, 180, 195)),
+                                );
                                 let ready_color = if self.ready_count > 0
                                     && (self.viewers_count == 0
                                         || self.ready_count >= self.viewers_count)
@@ -1685,10 +1859,50 @@ impl SyncPlayApp {
                                         .color(ready_color)
                                         .strong(),
                                 );
+
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.add_space(6.0);
+
+                                ui.label(
+                                    RichText::new("Status")
+                                        .strong()
+                                        .size(11.5)
+                                        .color(Color32::from_rgb(180, 180, 195)),
+                                );
+                                let viewer_statuses = self.get_viewer_status_list();
+                                if viewer_statuses.is_empty() {
+                                    ui.label(
+                                        RichText::new("No viewers connected")
+                                            .italics()
+                                            .size(11.0)
+                                            .color(Color32::GRAY),
+                                    );
+                                } else {
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("viewers_status_scroll")
+                                        .max_height(120.0)
+                                        .auto_shrink([false, true])
+                                        .show(ui, |ui| {
+                                            ui.set_width(ui.available_width());
+                                            for (line, is_paused) in viewer_statuses {
+                                                let color = if is_paused {
+                                                    Color32::from_rgb(255, 205, 90)
+                                                } else {
+                                                    Color32::from_rgb(90, 220, 110)
+                                                };
+                                                ui.label(RichText::new(line).color(color));
+                                            }
+                                        });
+                                }
                             });
-                        });
                     });
-            });
+                self.viewers_popup_rect = Some(area_resp.response.rect);
+            }
+        } else {
+            self.viewers_popup_rect = None;
+        }
+        self.viewers_btn_rect = viewers_btn_rect;
 
         // Bottom OSC Bar: Modern Media Player Rework (Two-row layout)
         let bottom_h = 92.0;
@@ -3053,5 +3267,34 @@ mod tests {
         // Unmute restores 60.0
         app.toggle_mute();
         assert_eq!(app.volume, 60.0);
+    }
+
+    #[test]
+    fn test_viewer_status_list_and_popup() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+        assert!(app.get_viewer_status_list().is_empty());
+        assert!(!app.viewers_popup_open);
+
+        app.handle_network_message(SyncMessage::UserCount { count: 3 });
+        app.handle_network_message(SyncMessage::ViewerStates {
+            paused: vec![false, false, true],
+        });
+
+        let statuses: Vec<String> = app
+            .get_viewer_status_list()
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![
+                "Viewer 1: Playing".to_string(),
+                "Viewer 2: Playing".to_string(),
+                "Viewer 3: Paused".to_string(),
+            ]
+        );
     }
 }

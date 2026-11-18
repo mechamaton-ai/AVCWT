@@ -37,6 +37,14 @@ pub enum SyncMessage {
     ReadyCount {
         count: usize,
     },
+    ViewerStatus {
+        #[serde(default = "default_true")]
+        paused: bool,
+    },
+    ViewerStates {
+        #[serde(default)]
+        paused: Vec<bool>,
+    },
 }
 
 fn default_true() -> bool {
@@ -141,6 +149,21 @@ mod tests {
         let msg: SyncMessage = serde_json::from_str(ready_count_json).unwrap();
         assert_eq!(msg, SyncMessage::ReadyCount { count: 3 });
         assert_eq!(serde_json::to_string(&msg).unwrap(), ready_count_json);
+
+        let viewer_status_json = r#"{"action":"viewer_status","paused":false}"#;
+        let msg: SyncMessage = serde_json::from_str(viewer_status_json).unwrap();
+        assert_eq!(msg, SyncMessage::ViewerStatus { paused: false });
+        assert_eq!(serde_json::to_string(&msg).unwrap(), viewer_status_json);
+
+        let viewer_states_json = r#"{"action":"viewer_states","paused":[false,false,true]}"#;
+        let msg: SyncMessage = serde_json::from_str(viewer_states_json).unwrap();
+        assert_eq!(
+            msg,
+            SyncMessage::ViewerStates {
+                paused: vec![false, false, true]
+            }
+        );
+        assert_eq!(serde_json::to_string(&msg).unwrap(), viewer_states_json);
     }
 
     #[test]

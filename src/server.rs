@@ -25,6 +25,7 @@ pub struct ServerState {
     pub is_paused: bool,
     pub client_times: HashMap<ClientId, f64>,
     pub ready_clients: HashSet<ClientId>,
+    pub client_paused: HashMap<ClientId, bool>,
 }
 
 impl Default for ServerState {
@@ -43,6 +44,7 @@ impl ServerState {
             is_paused: true,
             client_times: HashMap::new(),
             ready_clients: HashSet::new(),
+            client_paused: HashMap::new(),
         }
     }
 
@@ -74,6 +76,21 @@ impl ServerState {
         if let Ok(msg) = serde_json::to_string(&SyncMessage::ReadyCount {
             count: self.ready_clients.len(),
         }) {
+            self.broadcast_all(&msg);
+        }
+    }
+
+    pub fn broadcast_viewer_states(&self) {
+        if self.clients.is_empty() {
+            return;
+        }
+        let mut ids: Vec<ClientId> = self.clients.keys().copied().collect();
+        ids.sort_unstable();
+        let paused: Vec<bool> = ids
+            .into_iter()
+            .map(|id| self.client_paused.get(&id).copied().unwrap_or(self.is_paused))
+            .collect();
+        if let Ok(msg) = serde_json::to_string(&SyncMessage::ViewerStates { paused }) {
             self.broadcast_all(&msg);
         }
     }
@@ -118,6 +135,7 @@ impl ServerState {
         self.clients.remove(&id);
         self.client_times.remove(&id);
         let was_ready = self.ready_clients.remove(&id);
+        let had_status = self.client_paused.remove(&id).is_some();
         info!("Client disconnected. Total clients: {}", self.clients.len());
         self.broadcast_user_count();
         if was_ready {
@@ -125,9 +143,15 @@ impl ServerState {
         }
 
         self.is_paused = true;
+        for paused in self.client_paused.values_mut() {
+            *paused = true;
+        }
         if !self.clients.is_empty() {
             if let Ok(pause_msg) = serde_json::to_string(&SyncMessage::Pause { state: true }) {
                 self.broadcast_all(&pause_msg);
+            }
+            if had_status || !self.client_paused.is_empty() {
+                self.broadcast_viewer_states();
             }
         }
     }
@@ -142,6 +166,14 @@ impl ServerState {
                         self.current_time = 0.0;
                         self.is_paused = false;
                         self.client_times.clear();
+                        if !self.client_paused.is_empty() {
+                            for paused in self.client_paused.values_mut() {
+                                *paused = false;
+                            }
+                            self.broadcast_except(sender_id, raw_message);
+                            self.broadcast_viewer_states();
+                            return;
+                        }
                     }
                     SyncMessage::Playlist { urls } => {
                         self.playlist = urls;
@@ -149,6 +181,14 @@ impl ServerState {
                     SyncMessage::Pause { state } => {
                         self.is_paused = state;
                         self.client_times.clear();
+                        if !self.client_paused.is_empty() {
+                            for paused in self.client_paused.values_mut() {
+                                *paused = state;
+                            }
+                            self.broadcast_except(sender_id, raw_message);
+                            self.broadcast_viewer_states();
+                            return;
+                        }
                     }
                     SyncMessage::Seek { position } => {
                         self.current_time = position;
@@ -244,6 +284,12 @@ impl ServerState {
                     }
                     SyncMessage::ReadyCount { .. } => {}
                     SyncMessage::UserCount { .. } => {}
+                    SyncMessage::ViewerStatus { paused } => {
+                        self.client_paused.insert(sender_id, paused);
+                        self.broadcast_viewer_states();
+                        return;
+                    }
+                    SyncMessage::ViewerStates { .. } => {}
                 }
 
                 // Simple broadcast of original message to all other clients
@@ -615,6 +661,39 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<SyncMessage>(&rx3.try_recv().unwrap()).unwrap(),
             SyncMessage::ReadyCount { count: 1 }
+        );
+    }
+
+    #[test]
+    fn test_viewer_status_broadcast() {
+        let mut state = ServerState::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx3, mut rx3) = mpsc::unbounded_channel();
+
+        state.register_client(1, tx1);
+        state.register_client(2, tx2);
+        state.register_client(3, tx3);
+        while rx1.try_recv().is_ok() {}
+        while rx2.try_recv().is_ok() {}
+        while rx3.try_recv().is_ok() {}
+
+        state.process_message(1, r#"{"action":"viewer_status","paused":false}"#);
+        let _ = rx1.try_recv();
+        let _ = rx2.try_recv();
+        let _ = rx3.try_recv();
+
+        state.process_message(2, r#"{"action":"viewer_status","paused":false}"#);
+        let _ = rx1.try_recv();
+        let _ = rx2.try_recv();
+        let _ = rx3.try_recv();
+
+        state.process_message(3, r#"{"action":"viewer_status","paused":true}"#);
+        assert_eq!(
+            serde_json::from_str::<SyncMessage>(&rx1.try_recv().unwrap()).unwrap(),
+            SyncMessage::ViewerStates {
+                paused: vec![false, false, true]
+            }
         );
     }
 }
