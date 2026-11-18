@@ -2627,7 +2627,7 @@ impl SyncPlayApp {
             .order(Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .collapsible(false)
-            .resizable(true)
+            .resizable(false)
             .frame(modal_frame)
             .default_size(Vec2::new(440.0, 280.0))
             .show(ctx, |ui| {
