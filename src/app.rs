@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use egui::{
-    Align, Color32, Context, CursorIcon, Frame, Id, Key, Layout, Margin, Order, Pos2, Rect,
+    Align, Color32, Context, CursorIcon, Frame, Id, Key, Layout, Margin, Order, PointerButton, Pos2, Rect,
     RichText, Rounding, Sense, Shape, Stroke, SystemTheme, TextureHandle, TextureOptions,
     Theme, ThemePreference, UiBuilder, Vec2, ViewportCommand,
 };
@@ -36,6 +36,7 @@ pub struct SyncPlayApp {
     cache_duration: f64,
     is_paused: bool,
     volume: f64,
+    pre_mute_volume: f64,
     video_aspect: f64,
     media_title: Option<String>,
 
@@ -128,6 +129,7 @@ impl SyncPlayApp {
             cache_duration: 0.0,
             is_paused: true,
             volume: 100.0,
+            pre_mute_volume: 100.0,
             video_aspect: 16.0 / 9.0,
             media_title: None,
 
@@ -349,8 +351,31 @@ impl SyncPlayApp {
 
     fn change_volume(&mut self, value: f64) {
         self.volume = value.clamp(0.0, 100.0);
+        if self.volume > 0.0 {
+            self.pre_mute_volume = self.volume;
+        }
         if let Some(ref player) = self.player {
             player.set_volume(self.volume);
+        }
+    }
+
+    pub fn toggle_mute(&mut self) {
+        if self.volume > 0.0 {
+            self.pre_mute_volume = self.volume;
+            self.volume = 0.0;
+            if let Some(ref player) = self.player {
+                player.set_volume(0.0);
+            }
+        } else {
+            let restore_vol = if self.pre_mute_volume > 0.0 {
+                self.pre_mute_volume
+            } else {
+                100.0
+            };
+            self.volume = restore_vol;
+            if let Some(ref player) = self.player {
+                player.set_volume(restore_vol);
+            }
         }
     }
 
@@ -1174,6 +1199,29 @@ impl SyncPlayApp {
                     self.audio_sub_popup_open = false;
                     self.volume_popup_open = false;
                     self.show_osc();
+                    ctx.request_repaint();
+                }
+
+                // Handle middle click anywhere in player to mute/unmute
+                let middle_clicked = response.middle_clicked()
+                    || ctx.input(|i| {
+                        i.pointer.button_clicked(PointerButton::Middle)
+                            || i.pointer.button_released(PointerButton::Middle)
+                            || i.events.iter().any(|ev| match ev {
+                                egui::Event::PointerButton {
+                                    button: PointerButton::Middle,
+                                    pressed: false,
+                                    ..
+                                } => true,
+                                _ => false,
+                            })
+                    });
+                if middle_clicked && (is_pointer_in_player || pointer_pos.is_none()) {
+                    self.audio_sub_popup_open = false;
+                    self.volume_popup_open = false;
+                    self.toggle_mute();
+                    self.show_osc();
+                    self.volume_indicator_until = Some(Instant::now() + Duration::from_millis(1500));
                     ctx.request_repaint();
                 }
 
@@ -2974,5 +3022,37 @@ mod tests {
         app.toggle_playback();
         assert!(!app.video_loading);
         assert!(!app.is_paused);
+    }
+
+    #[test]
+    fn test_toggle_mute() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+        assert_eq!(app.volume, 100.0);
+        assert_eq!(app.pre_mute_volume, 100.0);
+
+        // First mute
+        app.toggle_mute();
+        assert_eq!(app.volume, 0.0);
+        assert_eq!(app.pre_mute_volume, 100.0);
+
+        // Unmute restores volume
+        app.toggle_mute();
+        assert_eq!(app.volume, 100.0);
+
+        // Change volume to 60.0 then mute
+        app.change_volume(60.0);
+        assert_eq!(app.volume, 60.0);
+        assert_eq!(app.pre_mute_volume, 60.0);
+
+        app.toggle_mute();
+        assert_eq!(app.volume, 0.0);
+        assert_eq!(app.pre_mute_volume, 60.0);
+
+        // Unmute restores 60.0
+        app.toggle_mute();
+        assert_eq!(app.volume, 60.0);
     }
 }
