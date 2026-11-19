@@ -309,7 +309,7 @@ impl MpvPlayer {
             set_opt("cache", "yes");
             set_opt("keep-open", "yes");
             set_opt(
-                "demuxer-lavf-o",
+                "stream-lavf-o",
                 "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5",
             );
             set_opt("ytdl", "yes");
@@ -1045,6 +1045,14 @@ mod tests {
             Some("(bestvideo[dynamic_range=SDR][vcodec!^=av01]/bestvideo[vcodec!^=av01])+bestaudio/best")
         );
         assert_eq!(player.get_property_string("hwdec").as_deref(), Some("no"));
+        assert_eq!(
+            player.get_property_string("stream-lavf-o").as_deref(),
+            Some("reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
+        );
+        assert_eq!(
+            player.get_property_string("demuxer-lavf-o").as_deref(),
+            Some("")
+        );
         player.update_cache_size(250);
         player.set_volume(80.0);
         player.set_pause(true);

@@ -90,6 +90,7 @@ pub struct SyncPlayApp {
     pending_pause_apply_at: Option<Instant>,
     video_loading: bool,
     is_buffering: bool,
+    recovery_attempts: u8,
     last_time_pos: Option<f64>,
     last_sync_time: f64,
     awaiting_sync_reload: bool,
@@ -183,6 +184,7 @@ impl SyncPlayApp {
             pending_pause_apply_at: None,
             video_loading: false,
             is_buffering: false,
+            recovery_attempts: 0,
             last_time_pos: None,
             last_sync_time: 0.0,
             awaiting_sync_reload: false,
@@ -269,6 +271,7 @@ impl SyncPlayApp {
             self.pending_pause_apply_at = None;
         }
         self.is_buffering = false;
+        self.recovery_attempts = 0;
 
         let next = !self.is_paused;
         self.is_paused = next;
@@ -448,6 +451,7 @@ impl SyncPlayApp {
     pub fn play_url(&mut self, url: String, broadcast: bool) {
         self.video_loading = true;
         self.is_buffering = false;
+        self.recovery_attempts = 0;
         self.is_live = false;
         self.media_title = None;
         self.current_playing_url = Some(url.clone());
@@ -505,6 +509,7 @@ impl SyncPlayApp {
                 self.player = Some(p);
                 self.player_error = None;
                 self.video_loading = has_url;
+                self.recovery_attempts = 0;
                 self.pending_seek = if has_url { Some(resume_time) } else { None };
                 self.pending_pause = if has_url { Some(resume_paused) } else { None };
                 self.pending_pause_apply_at = None;
@@ -790,7 +795,12 @@ impl SyncPlayApp {
 
     fn on_mpv_buffering(&mut self, buffering: bool) {
         self.is_buffering = buffering;
-        if buffering && !self.video_loading && !self.is_paused {
+        if buffering
+            && !self.is_live
+            && !self.video_loading
+            && self.pending_pause_apply_at.is_none()
+            && !self.is_paused
+        {
             info!("Player is buffering (paused-for-cache); pausing everyone in room");
             self.is_paused = true;
             self.pending_pause = None;
@@ -817,9 +827,21 @@ impl SyncPlayApp {
 
     fn on_mpv_playback_error(&mut self) {
         if let Some(url) = self.current_playing_url.clone() {
+            if self.recovery_attempts >= 3 {
+                warn!(
+                    "MPV reported playback error on {} after {} recovery attempts; stopping auto-recovery",
+                    url, self.recovery_attempts
+                );
+                self.video_loading = false;
+                self.pending_pause = None;
+                self.pending_pause_apply_at = None;
+                self.is_paused = true;
+                return;
+            }
+            self.recovery_attempts += 1;
             warn!(
-                "MPV reported playback error on {}; pausing room and recovering stream",
-                url
+                "MPV reported playback error on {} (attempt {}); pausing room and recovering stream",
+                url, self.recovery_attempts
             );
             let was_playing = !self.is_paused;
             self.recover_stream(&url, self.current_time, true);
@@ -860,6 +882,7 @@ impl SyncPlayApp {
     fn complete_video_loading(&mut self) {
         if self.video_loading {
             self.video_loading = false;
+            self.recovery_attempts = 0;
             if let Some(seek_pos) = self.pending_seek.take() {
                 if !self.is_live {
                     self.current_time = seek_pos;
@@ -3296,5 +3319,47 @@ mod tests {
                 "Viewer 3: Paused".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_livestream_buffering_and_error_recovery_cap() {
+        let mut app = SyncPlayApp {
+            player: None,
+            ..SyncPlayApp::new()
+        };
+
+        // Live streams should NOT force-pause playback when mpv briefly buffers HLS segments
+        app.current_playing_url = Some("https://twitch.tv/example".to_string());
+        app.is_live = true;
+        app.video_loading = false;
+        app.is_paused = false;
+        app.on_mpv_buffering(true);
+        assert!(app.is_buffering);
+        assert!(!app.is_paused);
+
+        // Buffering during the post-load unpause delay window should NOT cancel pending unpause
+        app.is_live = false;
+        app.pending_pause = Some(false);
+        app.pending_pause_apply_at = Some(Instant::now() + Duration::from_millis(300));
+        app.on_mpv_buffering(true);
+        assert!(!app.is_paused);
+        assert_eq!(app.pending_pause, Some(false));
+        assert!(app.pending_pause_apply_at.is_some());
+
+        // Playback errors auto-recover up to 3 times, then stop instead of looping forever
+        app.pending_pause_apply_at = None;
+        for attempt in 1..=3 {
+            app.on_mpv_playback_error();
+            assert_eq!(app.recovery_attempts, attempt);
+            assert!(app.video_loading);
+        }
+        app.on_mpv_playback_error();
+        assert_eq!(app.recovery_attempts, 3);
+        assert!(!app.video_loading);
+        assert!(app.is_paused);
+
+        // Manual Play/Pause resets recovery attempts
+        app.toggle_playback();
+        assert_eq!(app.recovery_attempts, 0);
     }
 }
